@@ -12,6 +12,7 @@ mcu-rp2350 = ["embassy-rp/rp235xa"]
 embassy-executor = { version = "0.10.0", features = ["defmt", "platform-cortex-m", "executor-thread", "nightly"] }
 embassy-rp = { version = "0.10.0", features = ["defmt", "unstable-pac", "time-driver", "critical-section-impl"] }
 embassy-time = { version = "0.5.1", features = ["defmt", "defmt-timestamp-uptime", "tick-hz-1_000_000"] }
+
 embassy-usb = { version = "0.6.0", features = ["defmt", "usbd-hid", "max-interface-count-3", "max-handler-count-3"] }
 usbd-hid = "0.10.0"
 
