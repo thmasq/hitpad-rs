@@ -3,7 +3,7 @@
 #![feature(impl_trait_in_assoc_type)]
 
 mod config;
-mod hardware;
+mod types;
 
 use defmt_rtt as _;
 use panic_probe as _;

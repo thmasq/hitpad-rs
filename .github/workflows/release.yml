@@ -3,15 +3,15 @@ name: Release Firmware
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 jobs:
   build-and-release:
     name: Build and Upload Firmware
     runs-on: ubuntu-latest
-    
+
     permissions:
-      contents: write 
+      contents: write
 
     steps:
       - name: Checkout repository

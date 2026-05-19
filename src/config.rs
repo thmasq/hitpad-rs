@@ -1,6 +1,6 @@
 //! Main user configuration file. Edit this, run `cargo build --release`, and flash!
 
-use crate::hardware::types::{BootOverride, Button::*, InputMode, InputMode::*, Profile};
+use crate::types::{BootOverride, Button, Button::*, InputMode, InputMode::*, Profile};
 
 // ==========================================
 // 1. SYSTEM & BOOT SETTINGS
@@ -34,11 +34,11 @@ pub const REBOOT_PIN: Option<u8> = Some(26);
 // ==========================================
 
 /// Buttons you must hold down to trigger a profile switch.
-pub const PROFILE_MODIFIER: &[crate::hardware::types::Button] = &[Start, Select];
+pub const PROFILE_MODIFIER: &[Button] = &[Start, Select];
 
 /// While holding the modifier buttons, press these to switch profiles.
-pub const PROFILE_NEXT: crate::hardware::types::Button = Right;
-pub const PROFILE_PREV: crate::hardware::types::Button = Left;
+pub const PROFILE_NEXT: Button = Right;
+pub const PROFILE_PREV: Button = Left;
 
 // ==========================================
 // 3. HARDWARE PIN MAPPINGS
@@ -78,9 +78,4 @@ pub const PROFILES: &[Profile] = &[
 // ==========================================
 // COMPILE-TIME VALIDATION (Do not touch)
 // ==========================================
-const _: () = crate::hardware::validation::validate_config(
-    PROFILES,
-    REBOOT_PIN,
-    PROFILE_MODIFIER,
-    BOOT_OVERRIDES,
-);
+const _: () = crate::types::validate_config(PROFILES, REBOOT_PIN, PROFILE_MODIFIER, BOOT_OVERRIDES);
