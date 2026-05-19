@@ -5,4 +5,4 @@ name = "rust"
 target = "thumbv6m-none-eabi"
 
 [language-server.rust-analyzer.config.check]
-command = "check"
+command = ["check", "--release", "--no-default-features", "--features mcu-rp2040"]
