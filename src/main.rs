@@ -1,12 +1,14 @@
 #![no_std]
 #![no_main]
 #![feature(impl_trait_in_assoc_type, adt_const_params)]
+#![allow(clippy::future_not_send)]
 
 mod config;
 mod keyboard;
 mod types;
 
 use defmt_rtt as _;
+use embassy_rp::config::Config;
 use embassy_rp::multicore::Stack;
 use panic_probe as _;
 
@@ -44,7 +46,7 @@ static EXECUTOR1: StaticCell<Executor> = StaticCell::new();
 
 #[entry]
 fn main() -> ! {
-    let p = embassy_rp::init(Default::default());
+    let p = embassy_rp::init(Config::default());
 
     defmt::info!("Hitpad-RS Booting in Dual-Core Mode...");
 
@@ -127,25 +129,25 @@ async fn main_loop_task(mut keyboard: KeyboardDriver<'static>, initial_state: u3
     loop {
         let debounced_state = DEBOUNCED_STATE.load(Ordering::Relaxed);
 
-        if let Some(reboot_idx) = config::REBOOT_PIN {
-            if (debounced_state & (1 << reboot_idx)) != 0 {
-                defmt::info!("Reboot pin triggered, resetting...");
-                cortex_m::peripheral::SCB::sys_reset();
-            }
+        if let Some(reboot_idx) = config::REBOOT_PIN
+            && (debounced_state & (1 << reboot_idx)) != 0
+        {
+            defmt::info!("Reboot pin triggered, resetting...");
+            cortex_m::peripheral::SCB::sys_reset();
         }
 
         let mut state = GamepadState::default();
         for (pin_idx, mapped_btn) in config::PROFILES[0].pin_map.iter().enumerate() {
-            if let Some(btn) = mapped_btn {
-                if (debounced_state & (1 << pin_idx)) != 0 {
-                    state.buttons |= ButtonState::from(*btn);
-                }
+            if let Some(btn) = mapped_btn
+                && (debounced_state & (1 << pin_idx)) != 0
+            {
+                state.buttons |= ButtonState::from(*btn);
             }
         }
 
         state.apply_socd::<{ SocdMode::Neutral }>();
 
-        let report = keyboard.translate_state(&state);
+        let report = KeyboardDriver::<'static>::translate_state(state);
         keyboard.write_report(report).await;
 
         Timer::after(Duration::from_millis(1)).await;
@@ -157,9 +159,7 @@ async fn main_loop_task(mut keyboard: KeyboardDriver<'static>, initial_state: u3
 #[embassy_executor::task]
 async fn sampler_task(initial_state: u32) {
     let mut history = [0u32; 16];
-    for i in 0..16 {
-        history[i] = initial_state;
-    }
+    history.fill(initial_state);
     let mut history_idx = 0;
     let mut current_debounced = initial_state;
 
@@ -189,17 +189,18 @@ async fn sampler_task(initial_state: u32) {
 fn detect_boot_mode(raw_state: u32) -> InputMode {
     for boot_override in config::BOOT_OVERRIDES {
         for (pin_idx, mapped_btn) in config::PROFILES[0].pin_map.iter().enumerate() {
-            if let Some(btn) = mapped_btn {
-                if *btn as u8 == boot_override.button as u8 && (raw_state & (1 << pin_idx)) != 0 {
-                    return boot_override.mode;
-                }
+            if let Some(btn) = mapped_btn
+                && *btn as u8 == boot_override.button as u8
+                && (raw_state & (1 << pin_idx)) != 0
+            {
+                return boot_override.mode;
             }
         }
     }
     config::DEFAULT_MODE
 }
 
-fn mode_str(mode: InputMode) -> &'static str {
+const fn mode_str(mode: InputMode) -> &'static str {
     match mode {
         InputMode::Keyboard => "Keyboard",
         InputMode::XInput => "XInput",

@@ -1,6 +1,15 @@
 //! Main user configuration file. Edit this, run `cargo build --release`, and flash!
 
-use crate::types::{BootOverride, Button, Button::*, InputMode, InputMode::*, Profile};
+use crate::types::{
+    BootOverride, Button,
+    Button::{
+        Action1, Action2, Action3, Action4, Action5, Action6, Action7, Action8, Down, Home, Left,
+        Right, Select, Start, Touchpad, Up,
+    },
+    InputMode,
+    InputMode::{Keyboard, PS5, XInput},
+    Profile,
+};
 
 // ==========================================
 // 1. SYSTEM & BOOT SETTINGS
@@ -37,7 +46,9 @@ pub const REBOOT_PIN: Option<u8> = Some(26);
 pub const PROFILE_MODIFIER: &[Button] = &[Start, Select];
 
 /// While holding the modifier buttons, press these to switch profiles.
+#[allow(dead_code)]
 pub const PROFILE_NEXT: Button = Right;
+#[allow(dead_code)]
 pub const PROFILE_PREV: Button = Left;
 
 // ==========================================

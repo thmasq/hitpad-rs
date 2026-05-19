@@ -29,27 +29,28 @@ bitflags! {
 }
 
 impl From<Button> for ButtonState {
+    #[allow(clippy::inline_always)]
     #[inline(always)]
     fn from(btn: Button) -> Self {
         match btn {
-            Button::Up => ButtonState::UP,
-            Button::Down => ButtonState::DOWN,
-            Button::Left => ButtonState::LEFT,
-            Button::Right => ButtonState::RIGHT,
-            Button::Action1 => ButtonState::ACTION1,
-            Button::Action2 => ButtonState::ACTION2,
-            Button::Action3 => ButtonState::ACTION3,
-            Button::Action4 => ButtonState::ACTION4,
-            Button::Action5 => ButtonState::ACTION5,
-            Button::Action6 => ButtonState::ACTION6,
-            Button::Action7 => ButtonState::ACTION7,
-            Button::Action8 => ButtonState::ACTION8,
-            Button::L3 => ButtonState::L3,
-            Button::R3 => ButtonState::R3,
-            Button::Start => ButtonState::START,
-            Button::Select => ButtonState::SELECT,
-            Button::Home => ButtonState::HOME,
-            Button::Touchpad => ButtonState::TOUCHPAD,
+            Button::Up => Self::UP,
+            Button::Down => Self::DOWN,
+            Button::Left => Self::LEFT,
+            Button::Right => Self::RIGHT,
+            Button::Action1 => Self::ACTION1,
+            Button::Action2 => Self::ACTION2,
+            Button::Action3 => Self::ACTION3,
+            Button::Action4 => Self::ACTION4,
+            Button::Action5 => Self::ACTION5,
+            Button::Action6 => Self::ACTION6,
+            Button::Action7 => Self::ACTION7,
+            Button::Action8 => Self::ACTION8,
+            Button::L3 => Self::L3,
+            Button::R3 => Self::R3,
+            Button::Start => Self::START,
+            Button::Select => Self::SELECT,
+            Button::Home => Self::HOME,
+            Button::Touchpad => Self::TOUCHPAD,
         }
     }
 }
@@ -63,6 +64,7 @@ pub struct GamepadState {
     // pub right_trigger: u8,
 }
 
+#[allow(dead_code)]
 #[derive(Default, Clone, Copy, Debug, PartialEq, Eq, ConstParamTy)]
 pub enum SocdMode {
     /// Up + Down = Neutral, Left + Right = Neutral (CPT Standard)
@@ -103,6 +105,7 @@ pub enum InputMode {
     PS5,
 }
 
+#[allow(dead_code)]
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Button {
     Up,
@@ -130,11 +133,10 @@ pub struct BootOverride {
     pub mode: InputMode,
 }
 
+#[allow(dead_code)]
 #[derive(Copy, Clone)]
 pub struct Profile {
     pub name: &'static str,
-    // We map GPIO pin index -> Option<Button>
-    // e.g., pin_map[2] = Some(Button::Up)
     pub pin_map: [Option<Button>; MAX_PINS],
 }
 
@@ -149,9 +151,10 @@ impl Profile {
 
     /// Const builder method.
     pub const fn bind(mut self, pin: u8, button: Button) -> Self {
-        if pin as usize >= MAX_PINS {
-            panic!("Invalid GPIO pin! RP2040 only supports pins 0-29.");
-        }
+        assert!(
+            (pin as usize) < MAX_PINS,
+            "Invalid GPIO pin! RP2040 only supports pins 0-29."
+        );
 
         self.pin_map[pin as usize] = Some(button);
         self
@@ -165,9 +168,10 @@ pub const fn validate_config(
     modifiers: &[Button],
     overrides: &[BootOverride],
 ) {
-    if profiles.is_empty() {
-        panic!("Configuration Error: You must define at least one Profile!");
-    }
+    assert!(
+        !profiles.is_empty(),
+        "Configuration Error: You must define at least one Profile!"
+    );
 
     let mut profile_idx = 0;
     while profile_idx < profiles.len() {
@@ -175,9 +179,10 @@ pub const fn validate_config(
 
         // --- REBOOT PIN CHECK ---
         if let Some(r_pin) = reboot_pin {
-            if profile.pin_map[r_pin as usize].is_some() {
-                panic!("Hardware Conflict: A button is mapped to the REBOOT_PIN!");
-            }
+            assert!(
+                profile.pin_map[r_pin as usize].is_none(),
+                "Hardware Conflict: A button is mapped to the REBOOT_PIN!"
+            );
         }
 
         let mut pin_idx = 0;
@@ -188,11 +193,10 @@ pub const fn validate_config(
                 let mut check_idx = pin_idx + 1;
                 while check_idx < profile.pin_map.len() {
                     if let Some(btn_b) = profile.pin_map[check_idx] {
-                        if btn_a as u8 == btn_b as u8 {
-                            panic!(
-                                "Configuration Error: A button is bound to multiple pins in the same profile!"
-                            );
-                        }
+                        assert!(
+                            btn_a as u8 != btn_b as u8,
+                            "Configuration Error: A button is bound to multiple pins in the same profile!"
+                        );
                     }
                     check_idx += 1;
                 }
@@ -209,20 +213,21 @@ pub const fn validate_config(
             let mut p_idx = 0;
 
             while p_idx < profile.pin_map.len() {
-                if let Some(mapped_btn) = profile.pin_map[p_idx] {
-                    if mapped_btn as u8 == req_btn as u8 {
-                        found = true;
-                        break;
-                    }
+                if let Some(mapped_btn) = profile.pin_map[p_idx]
+                    && mapped_btn as u8 == req_btn as u8
+                {
+                    found = true;
+                    break;
                 }
+
                 p_idx += 1;
             }
 
-            if !found {
-                panic!(
-                    "Profile Trap Error: A profile is missing a required PROFILE_MODIFIER button!"
-                );
-            }
+            assert!(
+                found,
+                "Profile Trap Error: A profile is missing a required PROFILE_MODIFIER button!"
+            );
+
             mod_idx += 1;
         }
 
@@ -238,20 +243,20 @@ pub const fn validate_config(
         let mut p_idx = 0;
 
         while p_idx < default_profile.pin_map.len() {
-            if let Some(mapped_btn) = default_profile.pin_map[p_idx] {
-                if mapped_btn as u8 == req_btn as u8 {
-                    found = true;
-                    break;
-                }
+            if let Some(mapped_btn) = default_profile.pin_map[p_idx]
+                && mapped_btn as u8 == req_btn as u8
+            {
+                found = true;
+                break;
             }
             p_idx += 1;
         }
 
-        if !found {
-            panic!(
-                "Override Error: A BootOverride button is not mapped on the default Profile (Profile 0)!"
-            );
-        }
+        assert!(
+            found,
+            "Override Error: A BootOverride button is not mapped on the default Profile (Profile 0)!"
+        );
+
         ovr_idx += 1;
     }
 }

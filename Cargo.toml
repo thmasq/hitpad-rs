@@ -22,8 +22,8 @@ cortex-m-rt = "0.7.5"
 defmt = "1.1.0"
 defmt-rtt = "1.2.0"
 panic-probe = { version = "1.0.0", features = ["print-defmt"] }
-static_cell = "2.1.1"
 portable-atomic = { version = "1.13", features = ["critical-section"] }
+static_cell = "2.1.1"
 
 [profile.release]
 debug = 2

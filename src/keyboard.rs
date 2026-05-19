@@ -35,7 +35,7 @@ pub struct NkroReport {
 }
 
 impl NkroReport {
-    pub fn set_key(&mut self, keycode: u8) {
+    pub const fn set_key(&mut self, keycode: u8) {
         let bit = keycode as usize;
         match bit {
             0..=31 => self.keybits0 |= 1 << bit,
@@ -72,7 +72,7 @@ impl<'d> KeyboardDriver<'d> {
     }
 
     /// Translates state into standard USB Keycodes.
-    pub fn translate_state(&self, state: &GamepadState) -> NkroReport {
+    pub fn translate_state(state: GamepadState) -> NkroReport {
         let mut report = NkroReport::default();
 
         // --- DIRECTIONAL INPUTS (WASD) ---
