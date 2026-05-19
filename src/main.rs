@@ -7,16 +7,20 @@ mod keyboard;
 mod types;
 
 use defmt_rtt as _;
+use embassy_rp::multicore::Stack;
 use panic_probe as _;
 
-use embassy_executor::Spawner;
+use cortex_m_rt::entry;
+use embassy_executor::Executor;
 use embassy_rp::bind_interrupts;
 use embassy_rp::gpio::{AnyPin, Input, Pull};
+use embassy_rp::pac;
 use embassy_rp::peripherals::USB;
 use embassy_rp::usb::{Driver, InterruptHandler};
 use embassy_time::{Duration, Timer};
 use embassy_usb::Builder;
 use embassy_usb::class::hid::State as HidState;
+use portable_atomic::{AtomicU32, Ordering};
 use static_cell::StaticCell;
 
 use crate::keyboard::KeyboardDriver;
@@ -32,15 +36,19 @@ static BOS_DESC: StaticCell<[u8; 256]> = StaticCell::new();
 static MSOS_DESC: StaticCell<[u8; 256]> = StaticCell::new();
 static CONTROL_BUF: StaticCell<[u8; 64]> = StaticCell::new();
 
-#[embassy_executor::main]
-async fn main(spawner: Spawner) {
+static DEBOUNCED_STATE: AtomicU32 = AtomicU32::new(0);
+
+static mut CORE1_STACK: Stack<4096> = Stack::new();
+static EXECUTOR0: StaticCell<Executor> = StaticCell::new();
+static EXECUTOR1: StaticCell<Executor> = StaticCell::new();
+
+#[entry]
+fn main() -> ! {
     let p = embassy_rp::init(Default::default());
 
-    defmt::info!("Hitpad-RS Booting...");
+    defmt::info!("Hitpad-RS Booting in Dual-Core Mode...");
 
-    // All 30 pins are initialized as pull-up inputs. The reboot pin (if any) is read
-    // alongside button pins. It simply isn't mapped to any ButtonState.
-    let pins: [Input<'static>; 30] = [
+    let _pins: [Input<'static>; 30] = [
         Input::new(p.PIN_0.into::<AnyPin>(), Pull::Up),
         Input::new(p.PIN_1.into::<AnyPin>(), Pull::Up),
         Input::new(p.PIN_2.into::<AnyPin>(), Pull::Up),
@@ -73,9 +81,19 @@ async fn main(spawner: Spawner) {
         Input::new(p.PIN_29.into::<AnyPin>(), Pull::Up),
     ];
 
-    // Read pins once before USB is set up. If a boot override button is held, it wins over DEFAULT_MODE. First match wins.
-    let active_mode = detect_boot_mode(&pins);
-    defmt::info!("Active input mode: {}", mode_str(active_mode));
+    let initial_state = !pac::SIO.gpio_in(0).read() & 0x3FFF_FFFF;
+    DEBOUNCED_STATE.store(initial_state, Ordering::Relaxed);
+
+    embassy_rp::multicore::spawn_core1(
+        p.CORE1,
+        unsafe { &mut *core::ptr::addr_of_mut!(CORE1_STACK) },
+        move || {
+            let executor1 = EXECUTOR1.init(Executor::new());
+            executor1.run(|spawner| {
+                spawner.spawn(sampler_task(initial_state).unwrap());
+            });
+        },
+    );
 
     let driver = Driver::new(p.USB, Irqs);
     let mut usb_config = embassy_usb::Config::new(0x1209, 0x0001);
@@ -91,13 +109,26 @@ async fn main(spawner: Spawner) {
         CONTROL_BUF.init([0; 64]),
     );
 
-    let mut keyboard = KeyboardDriver::new(&mut builder, HID_STATE.init(HidState::new()));
+    let keyboard = KeyboardDriver::new(&mut builder, HID_STATE.init(HidState::new()));
     let usb = builder.build();
-    spawner.spawn(usb_task(usb).expect("Failed to spawn USB task"));
+
+    let executor0 = EXECUTOR0.init(Executor::new());
+    executor0.run(move |spawner| {
+        spawner.spawn(usb_task(usb).unwrap());
+        spawner.spawn(main_loop_task(keyboard, initial_state).unwrap());
+    })
+}
+
+#[embassy_executor::task]
+async fn main_loop_task(mut keyboard: KeyboardDriver<'static>, initial_state: u32) {
+    let active_mode = detect_boot_mode(initial_state);
+    defmt::info!("Active input mode: {}", mode_str(active_mode));
 
     loop {
+        let debounced_state = DEBOUNCED_STATE.load(Ordering::Relaxed);
+
         if let Some(reboot_idx) = config::REBOOT_PIN {
-            if pins[reboot_idx as usize].is_low() {
+            if (debounced_state & (1 << reboot_idx)) != 0 {
                 defmt::info!("Reboot pin triggered, resetting...");
                 cortex_m::peripheral::SCB::sys_reset();
             }
@@ -106,7 +137,7 @@ async fn main(spawner: Spawner) {
         let mut state = GamepadState::default();
         for (pin_idx, mapped_btn) in config::PROFILES[0].pin_map.iter().enumerate() {
             if let Some(btn) = mapped_btn {
-                if pins[pin_idx].is_low() {
+                if (debounced_state & (1 << pin_idx)) != 0 {
                     state.buttons |= ButtonState::from(*btn);
                 }
             }
@@ -121,14 +152,45 @@ async fn main(spawner: Spawner) {
     }
 }
 
+/// High-speed independent sampling task running on Core 1.
+/// Runs every 50 microseconds to guarantee a 16-sample debounce resolves in 0.8ms.
+#[embassy_executor::task]
+async fn sampler_task(initial_state: u32) {
+    let mut history = [0u32; 16];
+    for i in 0..16 {
+        history[i] = initial_state;
+    }
+    let mut history_idx = 0;
+    let mut current_debounced = initial_state;
+
+    loop {
+        let raw_state = !pac::SIO.gpio_in(0).read() & 0x3FFF_FFFF;
+
+        history[history_idx] = raw_state;
+        history_idx = (history_idx + 1) % 16;
+
+        let mut all_ones = 0xFFFF_FFFF;
+        let mut all_zeros = 0xFFFF_FFFF;
+
+        for state in &history {
+            all_ones &= state;
+            all_zeros &= !state;
+        }
+
+        current_debounced = (current_debounced | all_ones) & !all_zeros;
+
+        DEBOUNCED_STATE.store(current_debounced, Ordering::Relaxed);
+
+        Timer::after(Duration::from_micros(50)).await;
+    }
+}
+
 /// Checks whether any boot override button is held at startup.
-/// Iterates BOOT_OVERRIDES in order; first pressed button wins.
-/// Falls back to DEFAULT_MODE if nothing is held.
-fn detect_boot_mode(pins: &[Input<'static>; 30]) -> InputMode {
+fn detect_boot_mode(raw_state: u32) -> InputMode {
     for boot_override in config::BOOT_OVERRIDES {
         for (pin_idx, mapped_btn) in config::PROFILES[0].pin_map.iter().enumerate() {
             if let Some(btn) = mapped_btn {
-                if *btn as u8 == boot_override.button as u8 && pins[pin_idx].is_low() {
+                if *btn as u8 == boot_override.button as u8 && (raw_state & (1 << pin_idx)) != 0 {
                     return boot_override.mode;
                 }
             }
