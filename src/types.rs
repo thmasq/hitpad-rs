@@ -1,4 +1,100 @@
+use bitflags::bitflags;
+use core::marker::ConstParamTy;
+
 const MAX_PINS: usize = 30;
+
+bitflags! {
+    /// A bitmask representing the physical buttons currently held down.
+    #[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct ButtonState: u32 {
+        const UP       = 1 << 0;
+        const DOWN     = 1 << 1;
+        const LEFT     = 1 << 2;
+        const RIGHT    = 1 << 3;
+        const ACTION1  = 1 << 4;
+        const ACTION2  = 1 << 5;
+        const ACTION3  = 1 << 6;
+        const ACTION4  = 1 << 7;
+        const ACTION5  = 1 << 8;
+        const ACTION6  = 1 << 9;
+        const ACTION7  = 1 << 10;
+        const ACTION8  = 1 << 11;
+        const L3       = 1 << 12;
+        const R3       = 1 << 13;
+        const START    = 1 << 14;
+        const SELECT   = 1 << 15;
+        const HOME     = 1 << 16;
+        const TOUCHPAD = 1 << 17;
+    }
+}
+
+impl From<Button> for ButtonState {
+    #[inline(always)]
+    fn from(btn: Button) -> Self {
+        match btn {
+            Button::Up => ButtonState::UP,
+            Button::Down => ButtonState::DOWN,
+            Button::Left => ButtonState::LEFT,
+            Button::Right => ButtonState::RIGHT,
+            Button::Action1 => ButtonState::ACTION1,
+            Button::Action2 => ButtonState::ACTION2,
+            Button::Action3 => ButtonState::ACTION3,
+            Button::Action4 => ButtonState::ACTION4,
+            Button::Action5 => ButtonState::ACTION5,
+            Button::Action6 => ButtonState::ACTION6,
+            Button::Action7 => ButtonState::ACTION7,
+            Button::Action8 => ButtonState::ACTION8,
+            Button::L3 => ButtonState::L3,
+            Button::R3 => ButtonState::R3,
+            Button::Start => ButtonState::START,
+            Button::Select => ButtonState::SELECT,
+            Button::Home => ButtonState::HOME,
+            Button::Touchpad => ButtonState::TOUCHPAD,
+        }
+    }
+}
+
+/// The global representation of the controller's state during a single tick.
+#[derive(Default, Clone, Copy, Debug)]
+pub struct GamepadState {
+    pub buttons: ButtonState,
+    // Note: if I ever decide to add analog trigger/stick support, it would go here.
+    // pub left_trigger: u8,
+    // pub right_trigger: u8,
+}
+
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq, ConstParamTy)]
+pub enum SocdMode {
+    /// Up + Down = Neutral, Left + Right = Neutral (CPT Standard)
+    #[default]
+    Neutral,
+    /// Up + Down = Up, Left + Right = Neutral
+    UpPriority,
+}
+
+impl GamepadState {
+    /// Cleans the current directional inputs based on the selected SOCD resolution mode.
+    #[inline]
+    pub fn apply_socd<const MODE: SocdMode>(&mut self) {
+        let left_right = ButtonState::LEFT | ButtonState::RIGHT;
+        let up_down = ButtonState::UP | ButtonState::DOWN;
+
+        if self.buttons.contains(left_right) {
+            self.buttons.remove(left_right);
+        }
+
+        if self.buttons.contains(up_down) {
+            match MODE {
+                SocdMode::Neutral => {
+                    self.buttons.remove(up_down);
+                }
+                SocdMode::UpPriority => {
+                    self.buttons.remove(ButtonState::DOWN);
+                }
+            }
+        }
+    }
+}
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum InputMode {
