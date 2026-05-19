@@ -1,0 +1,39 @@
+name: Release Firmware
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-release:
+    name: Build and Upload Firmware
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: write 
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        run: rustup show
+
+      - name: Build RP2040 Firmware
+        run: make rp2040
+
+      - name: Build RP2350 Firmware
+        run: make rp2350
+
+      - name: Rename and prepare artifacts
+        run: |
+          cp target/thumbv6m-none-eabi/release/hitpad-rs hitpad-rs-rp2040
+          cp target/thumbv8m.main-none-eabihf/release/hitpad-rs hitpad-rs-rp2350
+
+      - name: Publish Release Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            hitpad-rs-rp2040
+            hitpad-rs-rp2350
