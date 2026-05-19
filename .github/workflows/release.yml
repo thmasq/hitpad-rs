@@ -20,6 +20,9 @@ jobs:
       - name: Setup Rust toolchain
         run: rustup show
 
+      - name: Install flip-link
+        run: cargo install flip-link
+
       - name: Build RP2040 Firmware
         run: make rp2040
 
