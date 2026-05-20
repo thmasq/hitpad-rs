@@ -24,6 +24,7 @@ defmt-rtt = "1.2.0"
 panic-probe = { version = "1.0.0", features = ["print-defmt"] }
 portable-atomic = { version = "1.13", features = ["critical-section"] }
 static_cell = "2.1.1"
+paste = "1.0.15"
 
 [profile.release]
 debug = 2

@@ -1,14 +1,12 @@
 //! Main user configuration file. Edit this, run `cargo build --release`, and flash!
 
-use crate::types::{
-    BootOverride, Button,
-    Button::{
-        Action1, Action2, Action3, Action4, Action5, Action6, Action7, Action8, Down, Home, Left,
-        Right, Select, Start, Touchpad, Up,
+use crate::{
+    define_gamepad_config,
+    types::{
+        BootOverride,
+        Button::{self, Action1, Action2, Action3, Left, Right, Select, Start},
+        InputMode::{self, Keyboard, PS5, XInput},
     },
-    InputMode,
-    InputMode::{Keyboard, PS5, XInput},
-    Profile,
 };
 
 // ==========================================
@@ -34,10 +32,6 @@ pub const BOOT_OVERRIDES: &[BootOverride] = &[
     }, // PS5 (Square/X)
 ];
 
-/// A dedicated hardware pin that, when grounded, reboots the microcontroller with a software reset.
-/// Set to `None` if you don't have a dedicated reboot button.
-pub const REBOOT_PIN: Option<u8> = Some(26);
-
 // ==========================================
 // 2. PROFILE MANAGEMENT
 // ==========================================
@@ -55,36 +49,37 @@ pub const PROFILE_PREV: Button = Left;
 // 3. HARDWARE PIN MAPPINGS
 // ==========================================
 
-/// Define your layouts here. The first profile is the default.
-pub const PROFILES: &[Profile] = &[
-    // --- PROFILE 0: Standard Fighting Game Layout ---
-    Profile::new("Standard FightStick")
-        .bind(2, Up)
-        .bind(3, Down)
-        .bind(4, Left)
-        .bind(5, Right)
-        .bind(6, Action1) // Light Punch (Square / X)
-        .bind(7, Action2) // Medium Punch (Triangle / Y)
-        .bind(8, Action3) // Heavy Punch (R1 / RB)
-        .bind(9, Action4) // All Punch (L1 / LB)
-        .bind(10, Action5) // Light Kick (Cross / A)
-        .bind(11, Action6) // Medium Kick (Circle / B)
-        .bind(12, Action7) // Heavy Kick (R2 / RT)
-        .bind(13, Action8) // All Kick (L2 / LT)
-        .bind(14, Start)
-        .bind(15, Select)
-        .bind(16, Home)
-        .bind(17, Touchpad),
-    // --- PROFILE 1: Platformer / Smash Alternative ---
-    Profile::new("Platformer")
-        .bind(2, Action1) // Put "Jump" on the Up button
-        .bind(3, Down)
-        .bind(4, Left)
-        .bind(5, Right)
-        // ... rest of the binds
-        .bind(14, Start)
-        .bind(15, Select),
-];
+define_gamepad_config! {
+    reboot_pin: 26,
+    profiles: [
+        "Standard FightStick" => {
+            2: Up,
+            3: Down,
+            4: Left,
+            5: Right,
+            6: Action1,
+            7: Action2,
+            8: Action3,
+            9: Action4,
+            10: Action5,
+            11: Action6,
+            12: Action7,
+            13: Action8,
+            14: Start,
+            15: Select,
+            16: Home,
+            17: Touchpad
+        },
+        "Platformer" => {
+            2: Action1,
+            3: Down,
+            4: Left,
+            5: Right,
+            14: Start,
+            15: Select
+        }
+    ]
+}
 
 // ==========================================
 // COMPILE-TIME VALIDATION (Do not touch)

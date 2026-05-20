@@ -5,6 +5,7 @@
 
 mod config;
 mod keyboard;
+mod macros;
 mod types;
 
 use defmt_rtt as _;
@@ -15,7 +16,6 @@ use panic_probe as _;
 use cortex_m_rt::entry;
 use embassy_executor::Executor;
 use embassy_rp::bind_interrupts;
-use embassy_rp::gpio::{AnyPin, Input, Pull};
 use embassy_rp::pac;
 use embassy_rp::peripherals::USB;
 use embassy_rp::usb::{Driver, InterruptHandler};
@@ -50,40 +50,28 @@ fn main() -> ! {
 
     defmt::info!("Hitpad-RS Booting in Dual-Core Mode...");
 
-    let _pins: [Input<'static>; 30] = [
-        Input::new(p.PIN_0.into::<AnyPin>(), Pull::Up),
-        Input::new(p.PIN_1.into::<AnyPin>(), Pull::Up),
-        Input::new(p.PIN_2.into::<AnyPin>(), Pull::Up),
-        Input::new(p.PIN_3.into::<AnyPin>(), Pull::Up),
-        Input::new(p.PIN_4.into::<AnyPin>(), Pull::Up),
-        Input::new(p.PIN_5.into::<AnyPin>(), Pull::Up),
-        Input::new(p.PIN_6.into::<AnyPin>(), Pull::Up),
-        Input::new(p.PIN_7.into::<AnyPin>(), Pull::Up),
-        Input::new(p.PIN_8.into::<AnyPin>(), Pull::Up),
-        Input::new(p.PIN_9.into::<AnyPin>(), Pull::Up),
-        Input::new(p.PIN_10.into::<AnyPin>(), Pull::Up),
-        Input::new(p.PIN_11.into::<AnyPin>(), Pull::Up),
-        Input::new(p.PIN_12.into::<AnyPin>(), Pull::Up),
-        Input::new(p.PIN_13.into::<AnyPin>(), Pull::Up),
-        Input::new(p.PIN_14.into::<AnyPin>(), Pull::Up),
-        Input::new(p.PIN_15.into::<AnyPin>(), Pull::Up),
-        Input::new(p.PIN_16.into::<AnyPin>(), Pull::Up),
-        Input::new(p.PIN_17.into::<AnyPin>(), Pull::Up),
-        Input::new(p.PIN_18.into::<AnyPin>(), Pull::Up),
-        Input::new(p.PIN_19.into::<AnyPin>(), Pull::Up),
-        Input::new(p.PIN_20.into::<AnyPin>(), Pull::Up),
-        Input::new(p.PIN_21.into::<AnyPin>(), Pull::Up),
-        Input::new(p.PIN_22.into::<AnyPin>(), Pull::Up),
-        Input::new(p.PIN_23.into::<AnyPin>(), Pull::Up),
-        Input::new(p.PIN_24.into::<AnyPin>(), Pull::Up),
-        Input::new(p.PIN_25.into::<AnyPin>(), Pull::Up),
-        Input::new(p.PIN_26.into::<AnyPin>(), Pull::Up),
-        Input::new(p.PIN_27.into::<AnyPin>(), Pull::Up),
-        Input::new(p.PIN_28.into::<AnyPin>(), Pull::Up),
-        Input::new(p.PIN_29.into::<AnyPin>(), Pull::Up),
-    ];
+    claim_gamepad_pins!(p);
 
-    let initial_state = !pac::SIO.gpio_in(0).read() & 0x3FFF_FFFF;
+    for pin in 0..30 {
+        if (config::PIN_MASK & (1 << pin)) != 0 {
+            pac::PADS_BANK0.gpio(pin).modify(|w| {
+                w.set_pue(true);
+                w.set_pde(false);
+                w.set_ie(true);
+            });
+
+            pac::IO_BANK0.gpio(pin).ctrl().write(|w| {
+                w.set_funcsel(5);
+            });
+        }
+    }
+
+    // Because PIN_16 and 17 are in config.rs, this will fail
+    // to compile with a satisfying "use of moved value: p.PIN_16" error.
+    // let uart_config = embassy_rp::uart::Config::default();
+    // let _uart = embassy_rp::uart::Uart::new_blocking(p.UART0, p.PIN_16, p.PIN_17, uart_config);
+
+    let initial_state = !pac::SIO.gpio_in(0).read() & config::PIN_MASK;
     DEBOUNCED_STATE.store(initial_state, Ordering::Relaxed);
 
     embassy_rp::multicore::spawn_core1(
@@ -164,7 +152,7 @@ async fn sampler_task(initial_state: u32) {
     let mut current_debounced = initial_state;
 
     loop {
-        let raw_state = !pac::SIO.gpio_in(0).read() & 0x3FFF_FFFF;
+        let raw_state = !pac::SIO.gpio_in(0).read() & config::PIN_MASK;
 
         history[history_idx] = raw_state;
         history_idx = (history_idx + 1) % 16;

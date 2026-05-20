@@ -781,6 +781,7 @@ dependencies = [
  "embassy-time",
  "embassy-usb",
  "panic-probe",
+ "paste",
  "portable-atomic",
  "static_cell",
  "usbd-hid",
