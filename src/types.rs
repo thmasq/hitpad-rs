@@ -234,7 +234,7 @@ pub const fn validate_config(
         profile_idx += 1;
     }
 
-    // --- 4. BOOT OVERRIDE CHECK (Only applies to Default Profile 0) ---
+    // --- BOOT OVERRIDE CHECK (Only applies to Default Profile 0) ---
     let default_profile = &profiles[0];
     let mut ovr_idx = 0;
     while ovr_idx < overrides.len() {
@@ -258,5 +258,20 @@ pub const fn validate_config(
         );
 
         ovr_idx += 1;
+    }
+
+    // --- MODIFIER / BOOT OVERRIDE CONFLICT CHECK ---
+    let mut mod_idx = 0;
+    while mod_idx < modifiers.len() {
+        let mod_btn = modifiers[mod_idx];
+        let mut ovr_idx = 0;
+        while ovr_idx < overrides.len() {
+            assert!(
+                mod_btn as u8 != overrides[ovr_idx].button as u8,
+                "Configuration Error: A PROFILE_MODIFIER button is also used as a BootOverride trigger!"
+            );
+            ovr_idx += 1;
+        }
+        mod_idx += 1;
     }
 }
