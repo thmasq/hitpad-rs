@@ -1,14 +1,14 @@
 use crate::types::{ButtonState, GamepadState};
-use embassy_rp::peripherals::USB;
+use embassy_stm32::peripherals::USB_OTG_HS;
 use embassy_usb::Builder;
 use embassy_usb::class::hid::HidBootProtocol::Keyboard;
 use embassy_usb::class::hid::HidSubclass::Boot;
-use embassy_usb::class::hid::{Config as HidConfig, HidWriter};
+use embassy_usb::class::hid::{Config as HidConfig, HidWriter, RequestHandler};
 use usbd_hid::descriptor::AsInputReport;
 use usbd_hid::descriptor::SerializedDescriptor;
 use usbd_hid::descriptor::generator_prelude::gen_hid_descriptor;
 
-pub type UsbBus<'d> = embassy_rp::usb::Driver<'d, USB>;
+pub type UsbBus<'d> = embassy_stm32::usb::Driver<'d, USB_OTG_HS>;
 
 #[gen_hid_descriptor(
     (collection = APPLICATION, usage_page = GENERIC_DESKTOP, usage = KEYBOARD) = {
@@ -57,10 +57,11 @@ impl<'d> KeyboardDriver<'d> {
     pub fn new(
         builder: &mut Builder<'d, UsbBus<'d>>,
         state: &'d mut embassy_usb::class::hid::State<'d>,
+        request_handler: &'d mut dyn RequestHandler,
     ) -> Self {
         let hid_config = HidConfig {
             report_descriptor: NkroReport::desc(),
-            request_handler: None,
+            request_handler: Some(request_handler),
             poll_ms: 1,
             max_packet_size: 16,
             hid_subclass: Boot,

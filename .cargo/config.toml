@@ -1,5 +1,5 @@
-[target.thumbv6m-none-eabi]
-runner = "elf2uf2-rs -d"
+[target.thumbv7em-none-eabihf]
+runner = "probe-rs run --chip STM32H7R3Z8Jx"
 rustflags = [
   "-C",
   "linker=flip-link",
@@ -9,13 +9,5 @@ rustflags = [
   "link-arg=-Tdefmt.x",
 ]
 
-[target.thumbv8m.main-none-eabihf]
-runner = "elf2uf2-rs -d"
-rustflags = [
-  "-C",
-  "linker=flip-link",
-  "-C",
-  "link-arg=-Tlink.x",
-  "-C",
-  "link-arg=-Tdefmt.x",
-]
+[build]
+target = "thumbv7em-none-eabihf"

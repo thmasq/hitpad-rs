@@ -50,33 +50,33 @@ pub const PROFILE_PREV: Button = Left;
 // ==========================================
 
 define_gamepad_config! {
-    reboot_pin: 26,
+    reboot_pin: PB10,
     profiles: [
         "Standard FightStick" => {
-            2: Up,
-            3: Down,
-            4: Left,
-            5: Right,
-            6: Action1,
-            7: Action2,
-            8: Action3,
-            9: Action4,
-            10: Action5,
-            11: Action6,
-            12: Action7,
-            13: Action8,
-            14: Start,
-            15: Select,
-            16: Home,
-            17: Touchpad
+            PA2: Up,
+            PA3: Down,
+            PA4: Left,
+            PA5: Right,
+            PA6: Action1,
+            PA7: Action2,
+            PA8: Action3,
+            PA9: Action4,
+            PA10: Action5,
+            PA11: Action6,
+            PA12: Action7,
+            PA13: Action8,
+            PA14: Start,
+            PA15: Select,
+            PB0: Home,
+            PB1: Touchpad
         },
         "Platformer" => {
-            2: Action1,
-            3: Down,
-            4: Left,
-            5: Right,
-            14: Start,
-            15: Select
+            PA2: Action1,
+            PA3: Down,
+            PA4: Left,
+            PA5: Right,
+            PA14: Start,
+            PA15: Select
         }
     ]
 }

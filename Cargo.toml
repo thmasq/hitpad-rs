@@ -3,28 +3,21 @@ name = "hitpad-rs"
 version = "0.1.0"
 edition = "2024"
 
-[features]
-default = ["mcu-rp2040"]
-mcu-rp2040 = ["embassy-rp/rp2040"]
-mcu-rp2350 = ["embassy-rp/rp235xa"]
-
 [dependencies]
-embassy-executor = { version = "0.10.0", features = ["defmt", "platform-cortex-m", "executor-thread", "nightly"] }
-embassy-rp = { version = "0.10.0", features = ["defmt", "unstable-pac", "time-driver", "critical-section-impl"] }
-embassy-time = { version = "0.5.1", features = ["defmt", "defmt-timestamp-uptime", "tick-hz-1_000_000"] }
-
-embassy-usb = { version = "0.6.0", features = ["defmt", "usbd-hid", "max-interface-count-3", "max-handler-count-3"] }
-usbd-hid = "0.10.0"
-
 bitflags = "2.11.1"
-cortex-m = { version = "0.7.7", features = ["inline-asm"] }
+cortex-m = { version = "0.7.8", features = ["inline-asm", "critical-section-single-core"] }
 cortex-m-rt = "0.7.5"
 defmt = "1.1.0"
 defmt-rtt = "1.2.0"
+embassy-executor = { version = "0.10.0", features = ["defmt", "platform-cortex-m", "executor-thread", "nightly"] }
+embassy-stm32 = { version = "0.6.0", features = ["defmt", "stm32h7r3z8", "time-driver-any", "exti", "unstable-pac", "memory-x"] }
+embassy-time = { version = "0.5.1", features = ["defmt", "defmt-timestamp-uptime", "tick-hz-1_000_000"] }
+embassy-usb = { version = "0.6.0", features = ["defmt", "usbd-hid", "max-interface-count-3", "max-handler-count-3"] }
 panic-probe = { version = "1.0.0", features = ["print-defmt"] }
+paste = "1.0.15"
 portable-atomic = { version = "1.13", features = ["critical-section"] }
 static_cell = "2.1.1"
-paste = "1.0.15"
+usbd-hid = "0.10.0"
 
 [profile.release]
 debug = 2

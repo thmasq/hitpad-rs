@@ -2,13 +2,10 @@
 name = "rust"
 
 [language-server.rust-analyzer.config.cargo]
-target = "thumbv6m-none-eabi"
+target = "thumbv7em-none-eabihf"
 
 [language-server.rust-analyzer.config.check]
 command = "check"
 extraArgs = [
   "--release",
-  "--no-default-features",
-  "--features",
-  "mcu-rp2040",
 ]

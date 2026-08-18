@@ -9,19 +9,21 @@ mod macros;
 mod types;
 
 use defmt_rtt as _;
-use embassy_rp::config::Config;
-use embassy_rp::multicore::Stack;
 use panic_probe as _;
 
 use cortex_m_rt::entry;
 use embassy_executor::Executor;
-use embassy_rp::bind_interrupts;
-use embassy_rp::pac;
-use embassy_rp::peripherals::USB;
-use embassy_rp::usb::{Driver, InterruptHandler};
+use embassy_stm32::Config;
+use embassy_stm32::bind_interrupts;
+use embassy_stm32::pac;
+use embassy_stm32::peripherals::USB_OTG_HS;
+use embassy_stm32::usb::{Driver, InterruptHandler};
 use embassy_time::{Duration, Timer};
 use embassy_usb::Builder;
+use embassy_usb::Handler;
 use embassy_usb::class::hid::State as HidState;
+use embassy_usb::class::hid::{ReportId, RequestHandler};
+use embassy_usb::control::OutResponse;
 use portable_atomic::{AtomicU32, Ordering};
 use static_cell::StaticCell;
 
@@ -29,66 +31,141 @@ use crate::keyboard::KeyboardDriver;
 use crate::types::{ButtonState, GamepadState, InputMode, SocdMode};
 
 bind_interrupts!(struct Irqs {
-    USBCTRL_IRQ => InterruptHandler<USB>;
+    OTG_HS => InterruptHandler<USB_OTG_HS>;
 });
+
+static EP_OUT_BUFFER: StaticCell<[u8; 256]> = StaticCell::new();
 
 static HID_STATE: StaticCell<HidState> = StaticCell::new();
 static CONFIG_DESC: StaticCell<[u8; 256]> = StaticCell::new();
 static BOS_DESC: StaticCell<[u8; 256]> = StaticCell::new();
 static MSOS_DESC: StaticCell<[u8; 256]> = StaticCell::new();
 static CONTROL_BUF: StaticCell<[u8; 64]> = StaticCell::new();
+static DEVICE_HANDLER: StaticCell<MyDeviceHandler> = StaticCell::new();
+static REQUEST_HANDLER: StaticCell<MyRequestHandler> = StaticCell::new();
 
 static DEBOUNCED_STATE: AtomicU32 = AtomicU32::new(0);
-
-static mut CORE1_STACK: Stack<4096> = Stack::new();
 static EXECUTOR0: StaticCell<Executor> = StaticCell::new();
-static EXECUTOR1: StaticCell<Executor> = StaticCell::new();
+
+struct MyDeviceHandler {
+    configured: bool,
+}
+
+impl MyDeviceHandler {
+    fn new() -> Self {
+        MyDeviceHandler { configured: false }
+    }
+}
+
+impl Handler for MyDeviceHandler {
+    fn enabled(&mut self, _enabled: bool) {
+        self.configured = false;
+        defmt::info!("Device enabled");
+    }
+    fn reset(&mut self) {
+        self.configured = false;
+        defmt::info!("Bus reset, the Vbus current limit is 100mA");
+    }
+    fn addressed(&mut self, addr: u8) {
+        self.configured = false;
+        defmt::info!("USB address set to: {}", addr);
+    }
+    fn configured(&mut self, configured: bool) {
+        self.configured = configured;
+        if configured {
+            defmt::info!("Device configured");
+        } else {
+            defmt::info!("Device is no longer configured");
+        }
+    }
+}
+
+struct MyRequestHandler {}
+
+impl RequestHandler for MyRequestHandler {
+    fn get_report(&mut self, id: ReportId, _report_type: &mut [u8]) -> Option<usize> {
+        defmt::info!("Get report for {:?}", id);
+        None
+    }
+    fn set_report(&mut self, id: ReportId, data: &[u8]) -> OutResponse {
+        defmt::info!("Set report for {:?}: {=[u8]:x}", id, data);
+        OutResponse::Accepted
+    }
+    fn set_idle_ms(&mut self, id: Option<ReportId>, dur: u32) {
+        defmt::info!("Set idle rate for {:?} to {}ms", id, dur);
+    }
+    fn get_idle_ms(&mut self, id: Option<ReportId>) -> Option<u32> {
+        defmt::info!("Get idle rate for {:?}", id);
+        None
+    }
+}
 
 #[entry]
 fn main() -> ! {
-    let p = embassy_rp::init(Config::default());
+    let config = Config::default();
+    let p = embassy_stm32::init(config);
 
-    defmt::info!("Hitpad-RS Booting in Dual-Core Mode...");
+    defmt::info!("Hitpad-RS Booting on STM32H7R3...");
 
     claim_gamepad_pins!(p);
 
-    for pin in 0..30 {
-        if (config::PIN_MASK & (1 << pin)) != 0 {
-            pac::PADS_BANK0.gpio(pin).modify(|w| {
-                w.set_pue(true);
-                w.set_pde(false);
-                w.set_ie(true);
-            });
+    pac::RCC.ahb4enr().modify(|w| {
+        w.set_gpioaen(true);
+        w.set_gpioben(true);
+    });
 
-            pac::IO_BANK0.gpio(pin).ctrl().write(|w| {
-                w.set_funcsel(5);
-            });
+    // Initialize GPIOs based on PIN_MASK
+    // PIN_0 to PIN_15 map to GPIOA
+    // PIN_16 to PIN_31 map to GPIOB
+    for pin in 0..16 {
+        if (config::PIN_MASK & (1 << pin)) != 0 {
+            pac::GPIOA
+                .moder()
+                .modify(|w| w.set_moder(pin, pac::gpio::vals::Moder::INPUT));
+            pac::GPIOA
+                .pupdr()
+                .modify(|w| w.set_pupdr(pin, pac::gpio::vals::Pupdr::PULL_UP));
+        }
+    }
+    for pin in 16..32 {
+        if (config::PIN_MASK & (1 << pin)) != 0 {
+            let b_pin = pin - 16;
+            pac::GPIOB
+                .moder()
+                .modify(|w| w.set_moder(b_pin, pac::gpio::vals::Moder::INPUT));
+            pac::GPIOB
+                .pupdr()
+                .modify(|w| w.set_pupdr(b_pin, pac::gpio::vals::Pupdr::PULL_UP));
         }
     }
 
-    // Because PIN_16 and 17 are in config.rs, this will fail
-    // to compile with a satisfying "use of moved value: p.PIN_16" error.
-    // let uart_config = embassy_rp::uart::Config::default();
-    // let _uart = embassy_rp::uart::Uart::new_blocking(p.UART0, p.PIN_16, p.PIN_17, uart_config);
-
-    let initial_state = !pac::SIO.gpio_in(0).read() & config::PIN_MASK;
+    let initial_state = read_gpio_state();
     DEBOUNCED_STATE.store(initial_state, Ordering::Relaxed);
 
-    embassy_rp::multicore::spawn_core1(
-        p.CORE1,
-        unsafe { &mut *core::ptr::addr_of_mut!(CORE1_STACK) },
-        move || {
-            let executor1 = EXECUTOR1.init(Executor::new());
-            executor1.run(|spawner| {
-                spawner.spawn(sampler_task(initial_state).unwrap());
-            });
-        },
+    let driver = Driver::new_fs(
+        p.USB_OTG_HS,
+        Irqs,
+        p.PM6,
+        p.PM5,
+        EP_OUT_BUFFER.init([0; 256]),
+        embassy_stm32::usb::Config::default(),
     );
 
-    let driver = Driver::new(p.USB, Irqs);
+    let device_handler = DEVICE_HANDLER.init(MyDeviceHandler::new());
+    let request_handler = REQUEST_HANDLER.init(MyRequestHandler {});
+
     let mut usb_config = embassy_usb::Config::new(0x1209, 0x0001);
     usb_config.manufacturer = Some("Hitpad-RS");
     usb_config.product = Some("Keyboard Mode");
+    usb_config.serial_number = Some("32968645");
+    usb_config.max_power = 100; // Up to 200mA (100 * 2mA units)
+    usb_config.max_packet_size_0 = 64;
+    usb_config.device_class = 0x00;
+    usb_config.device_sub_class = 0x00;
+    usb_config.device_protocol = 0x00;
+    usb_config.composite_with_iads = false;
+    usb_config.device_release = 0x0103;
+    usb_config.supports_remote_wakeup = true;
 
     let mut builder = Builder::new(
         driver,
@@ -99,14 +176,33 @@ fn main() -> ! {
         CONTROL_BUF.init([0; 64]),
     );
 
-    let keyboard = KeyboardDriver::new(&mut builder, HID_STATE.init(HidState::new()));
+    builder.handler(device_handler);
+
+    let keyboard = KeyboardDriver::new(
+        &mut builder,
+        HID_STATE.init(HidState::new()),
+        request_handler,
+    );
+
     let usb = builder.build();
 
-    let executor0 = EXECUTOR0.init(Executor::new());
-    executor0.run(move |spawner| {
+    let executor = EXECUTOR0.init(Executor::new());
+    executor.run(move |spawner| {
         spawner.spawn(usb_task(usb).unwrap());
+        spawner.spawn(sampler_task(initial_state).unwrap());
         spawner.spawn(main_loop_task(keyboard, initial_state).unwrap());
     })
+}
+
+/// Reads GPIOA (Pins 0-15) and GPIOB (Pins 16-31) and combines them into a 32-bit integer.
+#[inline(always)]
+fn read_gpio_state() -> u32 {
+    let porta = pac::GPIOA.idr().read().0 as u32;
+    let portb = pac::GPIOB.idr().read().0 as u32;
+
+    let combined = (portb << 16) | porta;
+
+    !combined & config::PIN_MASK
 }
 
 #[embassy_executor::task]
@@ -117,19 +213,19 @@ async fn main_loop_task(mut keyboard: KeyboardDriver<'static>, initial_state: u3
     loop {
         let debounced_state = DEBOUNCED_STATE.load(Ordering::Relaxed);
 
-        if let Some(reboot_idx) = config::REBOOT_PIN
-            && (debounced_state & (1 << reboot_idx)) != 0
-        {
-            defmt::info!("Reboot pin triggered, resetting...");
-            cortex_m::peripheral::SCB::sys_reset();
+        if let Some(reboot_idx) = config::REBOOT_PIN {
+            if (debounced_state & (1 << reboot_idx)) != 0 {
+                defmt::info!("Reboot pin triggered, resetting...");
+                cortex_m::peripheral::SCB::sys_reset();
+            }
         }
 
         let mut state = GamepadState::default();
         for (pin_idx, mapped_btn) in config::PROFILES[0].pin_map.iter().enumerate() {
-            if let Some(btn) = mapped_btn
-                && (debounced_state & (1 << pin_idx)) != 0
-            {
-                state.buttons |= ButtonState::from(*btn);
+            if let Some(btn) = mapped_btn {
+                if (debounced_state & (1 << pin_idx)) != 0 {
+                    state.buttons |= ButtonState::from(*btn);
+                }
             }
         }
 
@@ -142,8 +238,6 @@ async fn main_loop_task(mut keyboard: KeyboardDriver<'static>, initial_state: u3
     }
 }
 
-/// High-speed independent sampling task running on Core 1.
-/// Runs every 50 microseconds to guarantee a 16-sample debounce resolves in 0.8ms.
 #[embassy_executor::task]
 async fn sampler_task(initial_state: u32) {
     let mut history = [0u32; 16];
@@ -152,7 +246,7 @@ async fn sampler_task(initial_state: u32) {
     let mut current_debounced = initial_state;
 
     loop {
-        let raw_state = !pac::SIO.gpio_in(0).read() & config::PIN_MASK;
+        let raw_state = read_gpio_state();
 
         history[history_idx] = raw_state;
         history_idx = (history_idx + 1) % 16;
@@ -166,22 +260,19 @@ async fn sampler_task(initial_state: u32) {
         }
 
         current_debounced = (current_debounced | all_ones) & !all_zeros;
-
         DEBOUNCED_STATE.store(current_debounced, Ordering::Relaxed);
 
         Timer::after(Duration::from_micros(50)).await;
     }
 }
 
-/// Checks whether any boot override button is held at startup.
 fn detect_boot_mode(raw_state: u32) -> InputMode {
     for boot_override in config::BOOT_OVERRIDES {
         for (pin_idx, mapped_btn) in config::PROFILES[0].pin_map.iter().enumerate() {
-            if let Some(btn) = mapped_btn
-                && *btn as u8 == boot_override.button as u8
-                && (raw_state & (1 << pin_idx)) != 0
-            {
-                return boot_override.mode;
+            if let Some(btn) = mapped_btn {
+                if *btn as u8 == boot_override.button as u8 && (raw_state & (1 << pin_idx)) != 0 {
+                    return boot_override.mode;
+                }
             }
         }
     }
@@ -197,6 +288,6 @@ const fn mode_str(mode: InputMode) -> &'static str {
 }
 
 #[embassy_executor::task]
-async fn usb_task(mut usb: embassy_usb::UsbDevice<'static, Driver<'static, USB>>) {
+async fn usb_task(mut usb: embassy_usb::UsbDevice<'static, Driver<'static, USB_OTG_HS>>) {
     usb.run().await;
 }
