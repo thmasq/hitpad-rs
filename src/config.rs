@@ -64,8 +64,8 @@ define_gamepad_config! {
             PA10: Action5,
             PA11: Action6,
             PA12: Action7,
-            PA13: Action8,
-            PA14: Start,
+            PB3: Action8,
+            PB4: Start,
             PA15: Select,
             PB0: Home,
             PB1: Touchpad
@@ -75,7 +75,7 @@ define_gamepad_config! {
             PA3: Down,
             PA4: Left,
             PA5: Right,
-            PA14: Start,
+            PB4: Start,
             PA15: Select
         }
     ]
