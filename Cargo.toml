@@ -18,6 +18,7 @@ static_cell = "2.1.1"
 usbd-hid = "0.10.0"
 bitflags = "2.11.1"
 embassy-usb-driver = { version = "0.2.2", features = ["defmt"] }
+embassy-usb-synopsys-otg = { path = "./embassy-usb-synopsys-otg-0.3.3", features = ["defmt", "host", "dma"] }
 
 [profile.release]
 debug = 2
@@ -32,3 +33,4 @@ lto = "fat"
 
 [patch.crates-io]
 embassy-stm32 = { path = "./embassy-stm32-0.6.0" }
+embassy-usb-synopsys-otg = { path = "./embassy-usb-synopsys-otg-0.3.3" }

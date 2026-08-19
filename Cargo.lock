@@ -494,8 +494,6 @@ dependencies = [
 [[package]]
 name = "embassy-usb-synopsys-otg"
 version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb205e26d59e483e8c48f91f637ec217ec7e2cfb0b61d50482301b991b4ff431"
 dependencies = [
  "critical-section",
  "defmt 1.1.1",
@@ -703,6 +701,7 @@ dependencies = [
  "embassy-time",
  "embassy-usb",
  "embassy-usb-driver",
+ "embassy-usb-synopsys-otg",
  "panic-probe",
  "portable-atomic",
  "static_cell",

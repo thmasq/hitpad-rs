@@ -3244,8 +3244,8 @@ optional = true
 version = "0.2.0"
 
 [dependencies.embassy-usb-synopsys-otg]
-version = "0.3.2"
-features = ["host"]
+path = "../embassy-usb-synopsys-otg-0.3.3"
+features = ["host", "dma"]
 
 [dependencies.embedded-can]
 version = "0.4"
