@@ -136,6 +136,7 @@ fn main() -> ! {
         config.rcc.apb4_pre = APBPrescaler::DIV2; // 150 Mhz
         config.rcc.apb5_pre = APBPrescaler::DIV2; // 150 Mhz
         config.rcc.voltage_scale = VoltageScale::HIGH;
+        config.rcc.mux.usbphycsel = Usbphycsel::HSE;
 
         config.rcc.hsi48 = Some(Hsi48Config {
             sync_from_usb: true,
@@ -184,7 +185,7 @@ fn main() -> ! {
     let mut driver_config_hs = embassy_stm32::usb::Config::default();
     driver_config_hs.vbus_detection = false;
 
-    let driver_hs = Driver::new_fs(
+    let driver_hs = Driver::new_hs(
         p.USB_OTG_HS,
         Irqs,
         p.PM6, // DP
