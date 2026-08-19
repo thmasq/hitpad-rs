@@ -8,6 +8,7 @@ mod keyboard;
 mod macros;
 mod types;
 
+use crate::pac::interrupt;
 use defmt_rtt as _;
 use embassy_stm32::time::Hertz;
 use panic_probe as _;
@@ -18,6 +19,7 @@ use embassy_stm32::Config;
 use embassy_stm32::bind_interrupts;
 use embassy_stm32::pac;
 use embassy_stm32::peripherals::{USB_OTG_FS, USB_OTG_HS};
+use embassy_stm32::usb::host::{HostDriver, HostState};
 use embassy_stm32::usb::{Driver, InterruptHandler};
 use embassy_time::{Duration, Timer};
 use embassy_usb::Builder;
@@ -25,6 +27,9 @@ use embassy_usb::Handler;
 use embassy_usb::class::hid::State as HidState;
 use embassy_usb::class::hid::{ReportId, RequestHandler};
 use embassy_usb::control::OutResponse;
+use embassy_usb_driver::host::UsbHostAllocator;
+use embassy_usb_driver::host::UsbPipe;
+use embassy_usb_driver::host::{DeviceEvent, UsbHostController};
 use portable_atomic::{AtomicU32, Ordering};
 use static_cell::StaticCell;
 
@@ -32,7 +37,6 @@ use crate::keyboard::KeyboardDriver;
 use crate::types::{ButtonState, GamepadState, InputMode, SocdMode};
 
 bind_interrupts!(struct Irqs {
-    OTG_FS => InterruptHandler<USB_OTG_FS>;
     OTG_HS => InterruptHandler<USB_OTG_HS>;
 });
 
@@ -44,13 +48,7 @@ static MSOS_DESC_HS: StaticCell<[u8; 256]> = StaticCell::new();
 static CONTROL_BUF_HS: StaticCell<[u8; 64]> = StaticCell::new();
 static DEVICE_HANDLER_HS: StaticCell<MyDeviceHandler> = StaticCell::new();
 static REQUEST_HANDLER_HS: StaticCell<MyRequestHandler> = StaticCell::new();
-
-static EP_OUT_BUFFER_FS: StaticCell<[u8; 256]> = StaticCell::new();
-static CONFIG_DESC_FS: StaticCell<[u8; 256]> = StaticCell::new();
-static BOS_DESC_FS: StaticCell<[u8; 256]> = StaticCell::new();
-static MSOS_DESC_FS: StaticCell<[u8; 256]> = StaticCell::new();
-static CONTROL_BUF_FS: StaticCell<[u8; 64]> = StaticCell::new();
-static DEVICE_HANDLER_FS: StaticCell<MyDeviceHandler> = StaticCell::new();
+static HOST_STATE: HostState<12> = HostState::new();
 
 static DEBOUNCED_STATE: AtomicU32 = AtomicU32::new(0);
 static EXECUTOR0: StaticCell<Executor> = StaticCell::new();
@@ -106,6 +104,11 @@ impl RequestHandler for MyRequestHandler {
         defmt::info!("Get idle rate for {:?}", id);
         None
     }
+}
+
+#[embassy_stm32::interrupt]
+unsafe fn OTG_FS() {
+    HostDriver::<'static, USB_OTG_FS, 12>::on_interrupt(&HOST_STATE);
 }
 
 #[entry]
@@ -229,50 +232,21 @@ fn main() -> ! {
 
     let usb_hs = builder_hs.build();
 
-    let mut driver_config_fs = embassy_stm32::usb::Config::default();
-    driver_config_fs.vbus_detection = false;
+    unsafe {
+        cortex_m::peripheral::NVIC::unmask(embassy_stm32::pac::Interrupt::OTG_FS);
+    }
 
-    let driver_fs = Driver::new_fs(
+    let driver_host = HostDriver::new_fs(
         p.USB_OTG_FS,
-        Irqs,
         p.PM11, // DP
         p.PM12, // DM
-        EP_OUT_BUFFER_FS.init([0; 256]),
-        driver_config_fs,
+        &HOST_STATE,
     );
-
-    let device_handler_fs = DEVICE_HANDLER_FS.init(MyDeviceHandler::new());
-
-    let mut usb_config_fs = embassy_usb::Config::new(0x1209, 0x0002);
-    usb_config_fs.manufacturer = Some("Hitpad-RS");
-    usb_config_fs.product = Some("Auth Port (placeholder)");
-    usb_config_fs.serial_number = Some("32968646");
-    usb_config_fs.max_power = 100;
-    usb_config_fs.max_packet_size_0 = 64;
-    usb_config_fs.device_class = 0x00;
-    usb_config_fs.device_sub_class = 0x00;
-    usb_config_fs.device_protocol = 0x00;
-    usb_config_fs.composite_with_iads = false;
-    usb_config_fs.device_release = 0x0103;
-    usb_config_fs.supports_remote_wakeup = true;
-
-    let mut builder_fs = Builder::new(
-        driver_fs,
-        usb_config_fs,
-        CONFIG_DESC_FS.init([0; 256]),
-        BOS_DESC_FS.init([0; 256]),
-        MSOS_DESC_FS.init([0; 256]),
-        CONTROL_BUF_FS.init([0; 64]),
-    );
-
-    builder_fs.handler(device_handler_fs);
-
-    let usb_fs = builder_fs.build();
 
     let executor = EXECUTOR0.init(Executor::new());
     executor.run(move |spawner| {
         spawner.spawn(usb_task_hs(usb_hs).unwrap());
-        spawner.spawn(usb_task_fs(usb_fs).unwrap());
+        spawner.spawn(host_task(driver_host).unwrap());
         spawner.spawn(sampler_task(initial_state).unwrap());
         spawner.spawn(main_loop_task(keyboard, initial_state).unwrap());
     })
@@ -377,6 +351,111 @@ async fn usb_task_hs(mut usb: embassy_usb::UsbDevice<'static, Driver<'static, US
 }
 
 #[embassy_executor::task]
-async fn usb_task_fs(mut usb: embassy_usb::UsbDevice<'static, Driver<'static, USB_OTG_FS>>) {
-    usb.run().await;
+async fn host_task(mut host: HostDriver<'static, USB_OTG_FS, 12>) {
+    defmt::info!("Starting USB Host on FS Port for Auth Dongle...");
+
+    loop {
+        let event = host.inner.wait_for_device_event().await;
+
+        match event {
+            DeviceEvent::Connected(_speed) => {
+                defmt::info!("MagicBoots Dongle Plugged In!");
+
+                let mut control_pipe = host.inner.allocator().alloc_pipe::<
+                        embassy_usb_driver::host::pipe::Control,
+                        embassy_usb_driver::host::pipe::InOut
+                    >(
+                        0,
+                        &embassy_usb_driver::EndpointInfo {
+                            addr: embassy_usb_driver::EndpointAddress::from_parts(0, embassy_usb_driver::Direction::Out),
+                            ep_type: embassy_usb_driver::EndpointType::Control,
+                            max_packet_size: 64,
+                            interval_ms: 0,
+                        },
+                        None,
+                    ).unwrap();
+
+                // Build the standard GET_DESCRIPTOR request
+                // bmRequestType: 0x80 (Dir: In, Type: Standard, Recipient: Device)
+                // bRequest: 0x06 (GET_DESCRIPTOR)
+                // wValue: 0x0100 (Type: Device Descriptor (1), Index: 0)
+                // wIndex: 0x0000
+                // wLength: 18 (Standard length of a Device Descriptor)
+                let setup_packet = [0x80, 0x06, 0x00, 0x01, 0x00, 0x00, 18, 0x00];
+                let mut descriptor_buf = [0u8; 18];
+
+                match control_pipe
+                    .control_in(&setup_packet, &mut descriptor_buf)
+                    .await
+                {
+                    Ok(len) => {
+                        defmt::info!(
+                            "Got Device Descriptor ({} bytes): {:02x}",
+                            len,
+                            descriptor_buf
+                        );
+                    }
+                    Err(e) => {
+                        defmt::error!("Failed to get descriptor: {:?}", e);
+                        continue;
+                    }
+                }
+
+                // Assign an address to the device (Address 1)
+                // bmRequestType: 0x00 (Dir: Out, Type: Standard, Recipient: Device)
+                // bRequest: 0x05 (SET_ADDRESS)
+                // wValue: 0x0001 (Address 1)
+                // wLength: 0
+                let set_addr_setup = [0x00, 0x05, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00];
+                match control_pipe.control_out(&set_addr_setup, &[]).await {
+                    Ok(_) => defmt::info!("Assigned Address 1 to Dongle"),
+                    Err(e) => {
+                        defmt::error!("Failed to set address: {:?}", e);
+                        continue;
+                    }
+                }
+
+                // USB Spec requires a short delay after SET_ADDRESS before the device responds to the new address
+                embassy_time::Timer::after_millis(10).await;
+
+                // Recreate the control pipe on the NEW address (1)
+                // Drop the old pipe to free up the host hardware channel
+                drop(control_pipe);
+
+                let mut control_pipe = host.inner.allocator().alloc_pipe::<
+    			embassy_usb_driver::host::pipe::Control,
+    			embassy_usb_driver::host::pipe::InOut
+                    >(
+    			1,
+    			&embassy_usb_driver::EndpointInfo {
+                            addr: embassy_usb_driver::EndpointAddress::from_parts(0, embassy_usb_driver::Direction::Out),
+                            ep_type: embassy_usb_driver::EndpointType::Control,
+                            max_packet_size: 64,
+                            interval_ms: 0,
+    			},
+    			None,
+                    ).unwrap();
+
+                // Set Configuration 1
+                // bmRequestType: 0x00
+                // bRequest: 0x09 (SET_CONFIGURATION)
+                // wValue: 0x0001 (Config 1)
+                let set_config_setup = [0x00, 0x09, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00];
+                match control_pipe.control_out(&set_config_setup, &[]).await {
+                    Ok(_) => defmt::info!("Dongle configured and active!"),
+                    Err(e) => {
+                        defmt::error!("Failed to set configuration: {:?}", e);
+                        continue;
+                    }
+                }
+            }
+            DeviceEvent::Disconnected => {
+                defmt::info!("MagicBoots Dongle Removed!");
+            }
+            DeviceEvent::Overcurrent => {
+                defmt::info!("USB Overcurrent detected!");
+            }
+            _ => {}
+        }
+    }
 }

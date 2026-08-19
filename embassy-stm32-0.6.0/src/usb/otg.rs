@@ -616,3 +616,59 @@ fn calculate_trdt<T: Instance>(speed: Dspd) -> u8 {
         _ => unimplemented!(),
     }
 }
+
+#[allow(missing_docs)]
+pub mod host {
+    use super::*;
+    pub use embassy_usb_synopsys_otg::host::{
+        HostState, OtgHost, OtgHostInstance, on_host_interrupt,
+    };
+
+    pub struct HostDriver<'d, T: Instance, const CH_COUNT: usize> {
+        phantom: PhantomData<&'d mut T>,
+        pub inner: OtgHost<'d, CH_COUNT>,
+    }
+
+    impl<'d, T: Instance, const CH_COUNT: usize> HostDriver<'d, T, CH_COUNT> {
+        pub fn new_fs(
+            _peri: Peri<'d, T>,
+            dp: Peri<'d, impl DpPin<T>>,
+            dm: Peri<'d, impl DmPin<T>>,
+            state: &'d HostState<CH_COUNT>,
+        ) -> Self {
+            crate::rcc::enable_and_reset::<T>();
+
+            let r = T::regs();
+            r.gccfg_v2().modify(|w| {
+                w.set_pwrdwn(true); // Enable internal FS PHY (logic is inverted in the svd)
+                w.set_phyhsen(false); // We are using FS mode here
+                w.set_vbden(false); // Disable VBUS sensing
+            });
+
+            #[cfg(usb_alternate_function)]
+            {
+                set_as_af!(dp, AfType::output(OutputType::PushPull, Speed::VeryHigh));
+                set_as_af!(dm, AfType::output(OutputType::PushPull, Speed::VeryHigh));
+            }
+            #[cfg(not(usb_alternate_function))]
+            let _ = (dp, dm);
+
+            let instance = OtgHostInstance {
+                regs: T::regs(),
+                state,
+                fifo_depth_words: T::FIFO_DEPTH_WORDS,
+                channel_count: CH_COUNT,
+                phy_type: PhyType::InternalFullSpeed,
+            };
+
+            Self {
+                inner: OtgHost::new(instance),
+                phantom: PhantomData,
+            }
+        }
+
+        pub fn on_interrupt(state: &HostState<CH_COUNT>) {
+            unsafe { on_host_interrupt(T::regs(), state, CH_COUNT) }
+        }
+    }
+}

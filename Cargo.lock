@@ -702,6 +702,7 @@ dependencies = [
  "embassy-stm32",
  "embassy-time",
  "embassy-usb",
+ "embassy-usb-driver",
  "panic-probe",
  "portable-atomic",
  "static_cell",

@@ -17,6 +17,7 @@ portable-atomic = { version = "1.13", features = ["critical-section"] }
 static_cell = "2.1.1"
 usbd-hid = "0.10.0"
 bitflags = "2.11.1"
+embassy-usb-driver = { version = "0.2.2", features = ["defmt"] }
 
 [profile.release]
 debug = 2
