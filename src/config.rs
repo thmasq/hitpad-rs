@@ -14,7 +14,7 @@ use crate::{
 // ==========================================
 
 /// The default mode the controller uses when plugged in normally.
-pub const DEFAULT_MODE: InputMode = PS5;
+pub const DEFAULT_MODE: InputMode = Keyboard;
 
 /// Hold these buttons while plugging in the USB to override the default mode.
 pub const BOOT_OVERRIDES: &[BootOverride] = &[

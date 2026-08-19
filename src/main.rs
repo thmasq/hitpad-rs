@@ -9,6 +9,7 @@ mod macros;
 mod types;
 
 use defmt_rtt as _;
+use embassy_stm32::time::Hertz;
 use panic_probe as _;
 
 use cortex_m_rt::entry;
@@ -111,9 +112,35 @@ impl RequestHandler for MyRequestHandler {
 fn main() -> ! {
     let mut config = Config::default();
 
-    config.rcc.hsi48 = Some(embassy_stm32::rcc::Hsi48Config {
-        sync_from_usb: true,
-    });
+    {
+        use embassy_stm32::rcc::*;
+
+        config.rcc.hse = Some(Hse {
+            freq: Hertz(24_000_000),
+            mode: HseMode::Oscillator,
+        });
+        config.rcc.pll1 = Some(Pll {
+            source: PllSource::HSE,
+            prediv: PllPreDiv::DIV3,
+            mul: PllMul::MUL150,
+            divp: Some(PllDiv::DIV2),
+            divq: None,
+            divr: None,
+            divs: None,
+            divt: None,
+        });
+        config.rcc.sys = Sysclk::PLL1_P; // 600 Mhz
+        config.rcc.ahb_pre = AHBPrescaler::DIV2; // 300 Mhz
+        config.rcc.apb1_pre = APBPrescaler::DIV2; // 150 Mhz
+        config.rcc.apb2_pre = APBPrescaler::DIV2; // 150 Mhz
+        config.rcc.apb4_pre = APBPrescaler::DIV2; // 150 Mhz
+        config.rcc.apb5_pre = APBPrescaler::DIV2; // 150 Mhz
+        config.rcc.voltage_scale = VoltageScale::HIGH;
+
+        config.rcc.hsi48 = Some(Hsi48Config {
+            sync_from_usb: true,
+        });
+    }
 
     let p = embassy_stm32::init(config);
 

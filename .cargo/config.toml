@@ -1,8 +1,6 @@
 [target.thumbv7em-none-eabihf]
-runner = "probe-rs run --protocol swd --speed 1000 --chip STM32H7R3Z8Jx"
+runner = "probe-rs run --chip STM32H7R3Z8Jx"
 rustflags = [
-  "-C",
-  "linker=flip-link",
   "-C",
   "link-arg=-Tlink.x",
   "-C",
@@ -11,3 +9,6 @@ rustflags = [
 
 [build]
 target = "thumbv7em-none-eabihf"
+
+[env]
+DEFMT_LOG = "trace,embassy_usb_synopsys_otg=warn"

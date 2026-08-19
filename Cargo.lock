@@ -363,8 +363,6 @@ dependencies = [
 [[package]]
 name = "embassy-stm32"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "486c0622deb5a519fc4d2cb8e3ef324f7568fcdfff201ff8fcab46557d663ceb"
 dependencies = [
  "aligned",
  "bit_field",
@@ -705,7 +703,6 @@ dependencies = [
  "embassy-time",
  "embassy-usb",
  "panic-probe",
- "paste",
  "portable-atomic",
  "static_cell",
  "usbd-hid",
@@ -817,12 +814,6 @@ dependencies = [
  "cortex-m",
  "defmt 1.1.1",
 ]
-
-[[package]]
-name = "paste"
-version = "1.0.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
 name = "pin-project-lite"
