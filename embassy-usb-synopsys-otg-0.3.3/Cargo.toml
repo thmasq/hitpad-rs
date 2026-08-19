@@ -58,6 +58,9 @@ dma = []
 name = "embassy_usb_synopsys_otg"
 path = "src/lib.rs"
 
+[dependencies]
+cortex-m = { version = "0.7.9", features = ["inline-asm", "critical-section-single-core"] }
+
 [dependencies.critical-section]
 version = "1.1"
 

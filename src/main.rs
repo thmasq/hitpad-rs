@@ -40,18 +40,23 @@ bind_interrupts!(struct Irqs {
     OTG_HS => InterruptHandler<USB_OTG_HS>;
 });
 
+#[unsafe(link_section = ".sram3")]
 static EP_OUT_BUFFER_HS: StaticCell<[u8; 256]> = StaticCell::new();
+
+#[unsafe(link_section = ".sram3")]
+static CONTROL_BUF_HS: StaticCell<[u8; 64]> = StaticCell::new();
+
+#[unsafe(link_section = ".sram3")]
+static EXECUTOR0: StaticCell<Executor> = StaticCell::new();
+
 static HID_STATE_HS: StaticCell<HidState> = StaticCell::new();
 static CONFIG_DESC_HS: StaticCell<[u8; 256]> = StaticCell::new();
 static BOS_DESC_HS: StaticCell<[u8; 256]> = StaticCell::new();
 static MSOS_DESC_HS: StaticCell<[u8; 256]> = StaticCell::new();
-static CONTROL_BUF_HS: StaticCell<[u8; 64]> = StaticCell::new();
 static DEVICE_HANDLER_HS: StaticCell<MyDeviceHandler> = StaticCell::new();
 static REQUEST_HANDLER_HS: StaticCell<MyRequestHandler> = StaticCell::new();
 static HOST_STATE: HostState<12> = HostState::new();
-
 static DEBOUNCED_STATE: AtomicU32 = AtomicU32::new(0);
-static EXECUTOR0: StaticCell<Executor> = StaticCell::new();
 
 struct MyDeviceHandler {
     configured: bool,
@@ -111,10 +116,51 @@ unsafe fn OTG_FS() {
     HostDriver::<'static, USB_OTG_FS, 12>::on_interrupt(&HOST_STATE);
 }
 
+#[inline(never)]
+fn enable_caches(cp: &mut cortex_m::peripheral::Peripherals) {
+    cp.SCB.enable_icache();
+    cp.SCB.enable_dcache(&mut cp.CPUID);
+}
+
 #[entry]
 fn main() -> ! {
-    let mut config = Config::default();
+    let mut cp = cortex_m::Peripherals::take().unwrap();
 
+    // Configure the MPU for the 32KB DMA_RAM region at 0x24000000
+    unsafe {
+        cp.MPU.ctrl.modify(|r| r & !1);
+        cp.MPU.rnr.write(0);
+        cp.MPU.rbar.write(0x24000000 | (1 << 4) | 0);
+
+        // Size: 32KB (0x0E), Enable=1
+        // TEX=1, C=0, B=0, S=1 -> Normal memory, Non-cacheable, Shareable
+        // AP=0b011 -> Full Access
+        // XN=1 -> Execute Never (prevent instruction fetches from data buffers)
+        cp.MPU.rasr.write(
+            (1 << 28)       // XN
+                | (0b011 << 24) // AP (Full Access)
+                | (1 << 19)     // TEX=1
+                | (0 << 18)     // S=0 (Non-shareable)
+                | (0 << 17)     // C=0 (Non-cacheable)
+                | (0 << 16)     // B=0 (Non-bufferable)
+                | (0x0E << 1)   // SIZE = 32KB
+                | 1, // ENABLE
+        );
+
+        // Re-enable MPU with default memory map for background regions (PRIVDEFENA)
+        cp.MPU.ctrl.modify(|r| r | 1 | (1 << 2));
+    }
+
+    enable_caches(&mut cp);
+
+    // Zero-initialize the custom DMA_RAM region.
+    // The startup code ignores NOLOAD sections, so it contains random garbage.
+    // StaticCell requires its memory to be 0 at startup!
+    unsafe {
+        core::ptr::write_bytes(0x24000000 as *mut u8, 0, 32768);
+    }
+
+    let mut config = Config::default();
     {
         use embassy_stm32::rcc::*;
 

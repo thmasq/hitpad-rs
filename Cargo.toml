@@ -9,7 +9,7 @@ cortex-m-rt = "0.7.5"
 defmt = "1.1.0"
 defmt-rtt = { version = "1.2.0", features = ["disable-blocking-mode"] }
 embassy-executor = { version = "0.10.0", features = ["defmt", "platform-cortex-m", "executor-thread", "nightly"] }
-embassy-stm32 = { version = "0.6.0", features = ["defmt", "stm32h7r3z8", "unstable-pac", "memory-x", "time-driver-any"] }
+embassy-stm32 = { version = "0.6.0", features = ["defmt", "stm32h7r3z8", "unstable-pac", "time-driver-any"] }
 embassy-time = { version = "0.5.1", features = ["defmt", "defmt-timestamp-uptime", "tick-hz-1_000_000"] }
 embassy-usb = { version = "0.6.0", features = ["defmt", "usbd-hid", "max-interface-count-3", "max-handler-count-3"] }
 panic-probe = { version = "1.0.0", features = ["print-defmt"] }
