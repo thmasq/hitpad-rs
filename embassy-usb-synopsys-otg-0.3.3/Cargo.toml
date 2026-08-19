@@ -10,33 +10,33 @@
 # See Cargo.toml.orig for the original contents.
 
 [package]
-edition = "2024"
 name = "embassy-usb-synopsys-otg"
 version = "0.3.3"
-build = false
-autolib = false
+autobenches = false
 autobins = false
 autoexamples = false
+autolib = false
 autotests = false
-autobenches = false
-description = "`embassy-usb-driver` implementation for Synopsys OTG USB controllers"
-documentation = "https://docs.embassy.dev/embassy-usb-synopsys-otg"
-readme = "README.md"
-keywords = [
-    "embedded",
-    "async",
-    "usb",
-    "hal",
-    "embedded-hal",
-]
+build = false
 categories = [
-    "embedded",
-    "hardware-support",
-    "no-std",
-    "asynchronous",
+  "embedded",
+  "hardware-support",
+  "no-std",
+  "asynchronous",
+]
+documentation = "https://docs.embassy.dev/embassy-usb-synopsys-otg"
+edition = "2024"
+keywords = [
+  "embedded",
+  "async",
+  "usb",
+  "hal",
+  "embedded-hal",
 ]
 license = "MIT OR Apache-2.0"
+readme = "README.md"
 repository = "https://github.com/embassy-rs/embassy"
+description = "`embassy-usb-driver` implementation for Synopsys OTG USB controllers"
 
 [package.metadata.embassy_docs]
 src_base = "https://github.com/embassy-rs/embassy/blob/embassy-usb-synopsys-otg-v$VERSION/embassy-usb-synopsys-otg/src/"
@@ -47,8 +47,8 @@ target = "thumbv7em-none-eabi"
 [features]
 default = []
 defmt = [
-    "dep:defmt",
-    "embassy-usb-driver/defmt",
+  "dep:defmt",
+  "embassy-usb-driver/defmt",
 ]
 host = []
 log = ["dep:log"]

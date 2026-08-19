@@ -63,8 +63,8 @@ struct MyDeviceHandler {
 }
 
 impl MyDeviceHandler {
-    fn new() -> Self {
-        MyDeviceHandler { configured: false }
+    const fn new() -> Self {
+        Self { configured: false }
     }
 }
 
@@ -123,6 +123,7 @@ fn enable_caches(cp: &mut cortex_m::peripheral::Peripherals) {
 }
 
 #[entry]
+#[allow(clippy::too_many_lines)]
 fn main() -> ! {
     let mut cp = cortex_m::Peripherals::take().unwrap();
 
@@ -130,19 +131,16 @@ fn main() -> ! {
     unsafe {
         cp.MPU.ctrl.modify(|r| r & !1);
         cp.MPU.rnr.write(0);
-        cp.MPU.rbar.write(0x24000000 | (1 << 4) | 0);
+        cp.MPU.rbar.write(0x2400_0000 | (1 << 4));
 
         // Size: 32KB (0x0E), Enable=1
         // TEX=1, C=0, B=0, S=1 -> Normal memory, Non-cacheable, Shareable
         // AP=0b011 -> Full Access
         // XN=1 -> Execute Never (prevent instruction fetches from data buffers)
         cp.MPU.rasr.write(
-            (1 << 28)       // XN
+            ((1 << 28)       // XN
                 | (0b011 << 24) // AP (Full Access)
-                | (1 << 19)     // TEX=1
-                | (0 << 18)     // S=0 (Non-shareable)
-                | (0 << 17)     // C=0 (Non-cacheable)
-                | (0 << 16)     // B=0 (Non-bufferable)
+                | (1 << 19))     // B=0 (Non-bufferable)
                 | (0x0E << 1)   // SIZE = 32KB
                 | 1, // ENABLE
         );
@@ -157,12 +155,15 @@ fn main() -> ! {
     // The startup code ignores NOLOAD sections, so it contains random garbage.
     // StaticCell requires its memory to be 0 at startup!
     unsafe {
-        core::ptr::write_bytes(0x24000000 as *mut u8, 0, 32768);
+        core::ptr::write_bytes(0x2400_0000 as *mut u8, 0, 32768);
     }
 
     let mut config = Config::default();
     {
-        use embassy_stm32::rcc::*;
+        use embassy_stm32::rcc::{
+            AHBPrescaler, APBPrescaler, Hse, HseMode, Hsi48Config, Pll, PllDiv, PllMul, PllPreDiv,
+            PllSource, Sysclk, Usbphycsel, VoltageScale,
+        };
 
         config.rcc.hse = Some(Hse {
             freq: Hertz(24_000_000),
@@ -299,10 +300,11 @@ fn main() -> ! {
 }
 
 /// Reads GPIOA (Pins 0-15) and GPIOB (Pins 16-31) and combines them into a 32-bit integer.
+#[allow(clippy::inline_always, clippy::similar_names)]
 #[inline(always)]
 fn read_gpio_state() -> u32 {
-    let porta = pac::GPIOA.idr().read().0 as u32;
-    let portb = pac::GPIOB.idr().read().0 as u32;
+    let porta = pac::GPIOA.idr().read().0;
+    let portb = pac::GPIOB.idr().read().0;
 
     let combined = (portb << 16) | porta;
 
@@ -317,19 +319,19 @@ async fn main_loop_task(mut keyboard: KeyboardDriver<'static, USB_OTG_HS>, initi
     loop {
         let debounced_state = DEBOUNCED_STATE.load(Ordering::Relaxed);
 
-        if let Some(reboot_idx) = config::REBOOT_PIN {
-            if (debounced_state & (1 << reboot_idx)) != 0 {
-                defmt::info!("Reboot pin triggered, resetting...");
-                cortex_m::peripheral::SCB::sys_reset();
-            }
+        if let Some(reboot_idx) = config::REBOOT_PIN
+            && (debounced_state & (1 << reboot_idx)) != 0
+        {
+            defmt::info!("Reboot pin triggered, resetting...");
+            cortex_m::peripheral::SCB::sys_reset();
         }
 
         let mut state = GamepadState::default();
         for (pin_idx, mapped_btn) in config::PROFILES[0].pin_map.iter().enumerate() {
-            if let Some(btn) = mapped_btn {
-                if (debounced_state & (1 << pin_idx)) != 0 {
-                    state.buttons |= ButtonState::from(*btn);
-                }
+            if let Some(btn) = mapped_btn
+                && (debounced_state & (1 << pin_idx)) != 0
+            {
+                state.buttons |= ButtonState::from(*btn);
             }
         }
 
@@ -373,10 +375,11 @@ async fn sampler_task(initial_state: u32) {
 fn detect_boot_mode(raw_state: u32) -> InputMode {
     for boot_override in config::BOOT_OVERRIDES {
         for (pin_idx, mapped_btn) in config::PROFILES[0].pin_map.iter().enumerate() {
-            if let Some(btn) = mapped_btn {
-                if *btn as u8 == boot_override.button as u8 && (raw_state & (1 << pin_idx)) != 0 {
-                    return boot_override.mode;
-                }
+            if let Some(btn) = mapped_btn
+                && *btn as u8 == boot_override.button as u8
+                && (raw_state & (1 << pin_idx)) != 0
+            {
+                return boot_override.mode;
             }
         }
     }
@@ -454,7 +457,7 @@ async fn host_task(mut host: HostDriver<'static, USB_OTG_FS, 12>) {
                 // wLength: 0
                 let set_addr_setup = [0x00, 0x05, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00];
                 match control_pipe.control_out(&set_addr_setup, &[]).await {
-                    Ok(_) => defmt::info!("Assigned Address 1 to Dongle"),
+                    Ok(()) => defmt::info!("Assigned Address 1 to Dongle"),
                     Err(e) => {
                         defmt::error!("Failed to set address: {:?}", e);
                         continue;
@@ -488,10 +491,9 @@ async fn host_task(mut host: HostDriver<'static, USB_OTG_FS, 12>) {
                 // wValue: 0x0001 (Config 1)
                 let set_config_setup = [0x00, 0x09, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00];
                 match control_pipe.control_out(&set_config_setup, &[]).await {
-                    Ok(_) => defmt::info!("Dongle configured and active!"),
+                    Ok(()) => defmt::info!("Dongle configured and active!"),
                     Err(e) => {
                         defmt::error!("Failed to set configuration: {:?}", e);
-                        continue;
                     }
                 }
             }
