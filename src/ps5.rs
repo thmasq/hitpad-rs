@@ -1,9 +1,8 @@
-use core::cell::RefCell;
+use core::cell::{Cell, RefCell};
 
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
-use embassy_time::{Duration, Timer};
 use embassy_usb::class::hid::{ReportId, RequestHandler};
 use embassy_usb::control::OutResponse;
 use portable_atomic::Ordering;
@@ -25,6 +24,8 @@ pub static AUTH_PAYLOAD_TO_DONGLE: Channel<CriticalSectionRawMutex, [u8; 63], 2>
 
 pub static HASH_REQ_CHANNEL: Channel<CriticalSectionRawMutex, Ps5Report, 2> = Channel::new();
 pub static HASH_RES_CHANNEL: Channel<CriticalSectionRawMutex, [u8; 8], 2> = Channel::new();
+
+static LATEST_HASH: Mutex<CriticalSectionRawMutex, Cell<[u8; 8]>> = Mutex::new(Cell::new([0; 8]));
 
 pub fn usb_config<'a>() -> embassy_usb::Config<'a> {
     let mut config = embassy_usb::Config::new(0x2B81, 0x0101);
@@ -243,39 +244,70 @@ pub async fn main_loop_task(
         64,
     >,
 ) {
-    defmt::info!("PS5 Mode active.");
+    defmt::info!("PS5 Mode active. Auth decoupled.");
 
-    loop {
-        let debounced_state = crate::DEBOUNCED_STATE.load(Ordering::Relaxed);
+    // Background Dongle Polling
+    // Runs as fast as the Full Speed USB bus allows (~2ms round trip).
+    // Constantly asks the MagicBoots dongle for fresh hashes.
+    let dongle_fut = async {
+        loop {
+            let debounced_state = crate::DEBOUNCED_STATE.load(Ordering::Relaxed);
+            let mut state = GamepadState::default();
+            for (pin_idx, mapped_btn) in crate::config::PROFILES[0].pin_map.iter().enumerate() {
+                if let Some(btn) = mapped_btn
+                    && (debounced_state & (1 << pin_idx)) != 0
+                {
+                    state.buttons |= ButtonState::from(*btn);
+                }
+            }
+            state.apply_socd::<{ SocdMode::Neutral }>();
 
-        if let Some(reboot_idx) = crate::config::REBOOT_PIN
-            && (debounced_state & (1 << reboot_idx)) != 0
-        {
-            defmt::info!("Reboot pin triggered, resetting...");
-            cortex_m::peripheral::SCB::sys_reset();
+            let report = translate_state(state);
+            let _ = HASH_REQ_CHANNEL.send(report).await;
+
+            // This blocks for ~2ms because of the FS USB frame rate
+            let hash = HASH_RES_CHANNEL.receive().await;
+
+            LATEST_HASH.lock(|c| c.set(hash));
         }
+    };
 
-        let mut state = GamepadState::default();
-        for (pin_idx, mapped_btn) in crate::config::PROFILES[0].pin_map.iter().enumerate() {
-            if let Some(btn) = mapped_btn
-                && (debounced_state & (1 << pin_idx)) != 0
+    // High-Speed USB Reporting
+    // Runs completely unblocked, paced strictly by the PS5 console's polling rate.
+    let usb_fut = async {
+        loop {
+            let debounced_state = crate::DEBOUNCED_STATE.load(Ordering::Relaxed);
+
+            if let Some(reboot_idx) = crate::config::REBOOT_PIN
+                && (debounced_state & (1 << reboot_idx)) != 0
             {
-                state.buttons |= ButtonState::from(*btn);
+                defmt::info!("Reboot pin triggered, resetting...");
+                cortex_m::peripheral::SCB::sys_reset();
+            }
+
+            let mut state = GamepadState::default();
+            for (pin_idx, mapped_btn) in crate::config::PROFILES[0].pin_map.iter().enumerate() {
+                if let Some(btn) = mapped_btn
+                    && (debounced_state & (1 << pin_idx)) != 0
+                {
+                    state.buttons |= ButtonState::from(*btn);
+                }
+            }
+            state.apply_socd::<{ SocdMode::Neutral }>();
+
+            let mut report = translate_state(state);
+
+            report.hash = LATEST_HASH.lock(|c| c.get());
+
+            let buf: &[u8] =
+                unsafe { core::slice::from_raw_parts(&report as *const _ as *const u8, 64) };
+
+            if hid.write(buf).await.is_err() {
+                embassy_time::Timer::after(embassy_time::Duration::from_millis(10)).await;
             }
         }
+    };
 
-        state.apply_socd::<{ SocdMode::Neutral }>();
-
-        let mut report = translate_state(state);
-        let _ = HASH_REQ_CHANNEL.send(report).await;
-
-        report.hash = HASH_RES_CHANNEL.receive().await;
-
-        let buf: &[u8] =
-            unsafe { core::slice::from_raw_parts(&report as *const _ as *const u8, 64) };
-
-        let _ = hid.write(buf).await;
-
-        Timer::after(Duration::from_millis(1)).await;
-    }
+    // Run both loops concurrently
+    embassy_futures::join::join(dongle_fut, usb_fut).await;
 }

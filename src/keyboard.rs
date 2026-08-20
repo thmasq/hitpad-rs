@@ -2,7 +2,6 @@ use core::sync::atomic::Ordering;
 
 use crate::types::{ButtonState, GamepadState, SocdMode};
 use embassy_stm32::usb::Instance;
-use embassy_time::{Duration, Timer};
 use embassy_usb::Builder;
 use embassy_usb::class::hid::HidBootProtocol::Keyboard;
 use embassy_usb::class::hid::HidSubclass::Boot;
@@ -155,13 +154,18 @@ impl<'d, T: Instance> Driver<'d, T> {
     }
 
     /// Sends the report over the endpoint.
-    pub async fn write_report(&mut self, report: NkroReport) {
-        let _ = self.writer.write_serialize(&report).await;
+    pub async fn write_report(
+        &mut self,
+        report: NkroReport,
+    ) -> Result<(), embassy_usb::driver::EndpointError> {
+        self.writer.write_serialize(&report).await
     }
 }
 
 #[embassy_executor::task]
 pub async fn main_loop_task(mut driver: Driver<'static, embassy_stm32::peripherals::USB_OTG_HS>) {
+    defmt::info!("Keyboard Mode active.");
+
     loop {
         let debounced_state = crate::DEBOUNCED_STATE.load(Ordering::Relaxed);
 
@@ -185,8 +189,9 @@ pub async fn main_loop_task(mut driver: Driver<'static, embassy_stm32::periphera
 
         let report =
             Driver::<'static, embassy_stm32::peripherals::USB_OTG_HS>::translate_state(state);
-        driver.write_report(report).await;
 
-        Timer::after(Duration::from_millis(1)).await;
+        if driver.write_report(report).await.is_err() {
+            embassy_time::Timer::after(embassy_time::Duration::from_millis(10)).await;
+        }
     }
 }

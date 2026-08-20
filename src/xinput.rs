@@ -1,5 +1,4 @@
 use crate::types::{ButtonState, GamepadState, SocdMode};
-use embassy_time::{Duration, Timer};
 use embassy_usb::Builder;
 use embassy_usb::driver::{Driver as UsbDriver, Endpoint, EndpointIn};
 use portable_atomic::Ordering;
@@ -229,14 +228,17 @@ impl<'d, D: UsbDriver<'d>> Driver<'d, D> {
         report
     }
 
-    pub async fn write_report(&mut self, report: XInputReport) {
+    pub async fn write_report(
+        &mut self,
+        report: XInputReport,
+    ) -> Result<(), embassy_usb::driver::EndpointError> {
         let buf: &[u8] = unsafe {
             core::slice::from_raw_parts(
                 &report as *const _ as *const u8,
                 core::mem::size_of::<XInputReport>(),
             )
         };
-        let _ = self.ep_in.write(buf).await;
+        self.ep_in.write(buf).await
     }
 }
 
@@ -277,8 +279,9 @@ pub async fn main_loop_task(
             'static,
             embassy_stm32::usb::Driver<'static, embassy_stm32::peripherals::USB_OTG_HS>,
         >::translate_state(state);
-        driver.write_report(report).await;
 
-        Timer::after(Duration::from_millis(1)).await;
+        if driver.write_report(report).await.is_err() {
+            embassy_time::Timer::after(embassy_time::Duration::from_millis(10)).await;
+        }
     }
 }

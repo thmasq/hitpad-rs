@@ -26,7 +26,6 @@ use embassy_stm32::pac;
 use embassy_stm32::peripherals::{USB_OTG_FS, USB_OTG_HS};
 use embassy_stm32::usb::host::{HostDriver, HostState};
 use embassy_stm32::usb::{Driver, InterruptHandler};
-use embassy_time::{Duration, Timer};
 use embassy_usb::Builder;
 use embassy_usb::Handler;
 use embassy_usb::class::hid::State as HidState;
@@ -361,6 +360,8 @@ async fn sampler_task(initial_state: u32) {
     let mut history_idx = 0;
     let mut current_debounced = initial_state;
 
+    let mut ticker = embassy_time::Ticker::every(embassy_time::Duration::from_micros(50));
+
     loop {
         let raw_state = read_gpio_state();
 
@@ -378,7 +379,7 @@ async fn sampler_task(initial_state: u32) {
         current_debounced = (current_debounced | all_ones) & !all_zeros;
         DEBOUNCED_STATE.store(current_debounced, Ordering::Relaxed);
 
-        Timer::after(Duration::from_micros(50)).await;
+        ticker.next().await;
     }
 }
 
