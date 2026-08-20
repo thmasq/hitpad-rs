@@ -59,7 +59,7 @@ define_gamepad_config! {
             PA5: Right,
             PA6: Action1,
             PA7: Action2,
-            PA8: Action3,
+            PB5: Action3,
             PA9: Action4,
             PA10: Action5,
             PA11: Action6,

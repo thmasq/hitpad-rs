@@ -1,5 +1,8 @@
-use crate::types::{ButtonState, GamepadState};
+use core::sync::atomic::Ordering;
+
+use crate::types::{ButtonState, GamepadState, SocdMode};
 use embassy_stm32::usb::Instance;
+use embassy_time::{Duration, Timer};
 use embassy_usb::Builder;
 use embassy_usb::class::hid::HidBootProtocol::Keyboard;
 use embassy_usb::class::hid::HidSubclass::Boot;
@@ -46,11 +49,26 @@ impl NkroReport {
     }
 }
 
-pub struct KeyboardDriver<'d, T: Instance> {
+pub fn usb_config<'a>() -> embassy_usb::Config<'a> {
+    let mut config = embassy_usb::Config::new(0x1209, 0x0001);
+    config.manufacturer = Some("Hitpad-RS");
+    config.product = Some("Keyboard Mode");
+    config.max_power = 100;
+    config.max_packet_size_0 = 64;
+    config.device_class = 0x00;
+    config.device_sub_class = 0x00;
+    config.device_protocol = 0x00;
+    config.composite_with_iads = false;
+    config.device_release = 0x0103;
+    config.supports_remote_wakeup = true;
+    config
+}
+
+pub struct Driver<'d, T: Instance> {
     writer: HidWriter<'d, embassy_stm32::usb::Driver<'d, T>, 16>,
 }
 
-impl<'d, T: Instance> KeyboardDriver<'d, T> {
+impl<'d, T: Instance> Driver<'d, T> {
     pub fn new(
         builder: &mut Builder<'d, embassy_stm32::usb::Driver<'d, T>>,
         state: &'d mut embassy_usb::class::hid::State<'d>,
@@ -139,5 +157,36 @@ impl<'d, T: Instance> KeyboardDriver<'d, T> {
     /// Sends the report over the endpoint.
     pub async fn write_report(&mut self, report: NkroReport) {
         let _ = self.writer.write_serialize(&report).await;
+    }
+}
+
+#[embassy_executor::task]
+pub async fn main_loop_task(mut driver: Driver<'static, embassy_stm32::peripherals::USB_OTG_HS>) {
+    loop {
+        let debounced_state = crate::DEBOUNCED_STATE.load(Ordering::Relaxed);
+
+        if let Some(reboot_idx) = crate::config::REBOOT_PIN
+            && (debounced_state & (1 << reboot_idx)) != 0
+        {
+            defmt::info!("Reboot pin triggered, resetting...");
+            cortex_m::peripheral::SCB::sys_reset();
+        }
+
+        let mut state = GamepadState::default();
+        for (pin_idx, mapped_btn) in crate::config::PROFILES[0].pin_map.iter().enumerate() {
+            if let Some(btn) = mapped_btn
+                && (debounced_state & (1 << pin_idx)) != 0
+            {
+                state.buttons |= ButtonState::from(*btn);
+            }
+        }
+
+        state.apply_socd::<{ SocdMode::Neutral }>();
+
+        let report =
+            Driver::<'static, embassy_stm32::peripherals::USB_OTG_HS>::translate_state(state);
+        driver.write_report(report).await;
+
+        Timer::after(Duration::from_millis(1)).await;
     }
 }

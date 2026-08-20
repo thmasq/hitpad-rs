@@ -11,8 +11,9 @@ defmt = "1.1.0"
 defmt-rtt = { version = "1.2.0", features = ["disable-blocking-mode"] }
 embassy-executor = { version = "0.10.0", features = ["defmt", "platform-cortex-m", "executor-thread", "nightly"] }
 embassy-stm32 = { version = "0.6.0", features = ["defmt", "stm32h7r3z8", "unstable-pac", "time-driver-any"] }
+embassy-sync = { version = "0.8.0", features = ["defmt"] }
 embassy-time = { version = "0.5.1", features = ["defmt", "defmt-timestamp-uptime", "tick-hz-1_000_000"] }
-embassy-usb = { version = "0.6.0", features = ["defmt", "usbd-hid", "max-interface-count-3", "max-handler-count-3"] }
+embassy-usb = { version = "0.6.0", features = ["defmt", "usbd-hid", "max-interface-count-8", "max-handler-count-4"] }
 embassy-usb-driver = { version = "0.2.2", features = ["defmt"] }
 embassy-usb-synopsys-otg = { path = "./embassy-usb-synopsys-otg-0.3.3", features = ["defmt", "host", "dma"] }
 panic-probe = { version = "1.0.0", features = ["print-defmt"] }
