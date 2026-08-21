@@ -266,12 +266,17 @@ pub async fn main_loop_task(
 
         let mut state = GamepadState::default();
         for (pin_idx, mapped_btn) in crate::config::PROFILES[0].pin_map.iter().enumerate() {
-            if let Some(btn) = mapped_btn
-                && (debounced_state & (1 << pin_idx)) != 0
-            {
-                state.buttons |= ButtonState::from(*btn);
+            if let Some(binding) = mapped_btn {
+                if let crate::types::ButtonBinding::Digital(btn) = binding {
+                    if (debounced_state & (1 << pin_idx)) != 0 {
+                        state.buttons |= ButtonState::from(*btn);
+                    }
+                }
             }
         }
+
+        state.buttons |=
+            ButtonState::from_bits_truncate(crate::ANALOG_BUTTON_STATE.load(Ordering::Relaxed));
 
         state.apply_socd::<{ SocdMode::Neutral }>();
 

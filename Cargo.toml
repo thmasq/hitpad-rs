@@ -25,13 +25,15 @@ usbd-hid = "0.10.0"
 [profile.release]
 debug = 2
 lto = "fat"
-opt-level = 3
+opt-level = "s"
+codegen-units = 1
 
 [profile.dev]
 opt-level = "s"
 debug-assertions = false
 overflow-checks = false
 lto = "fat"
+codegen-units = 1
 
 [patch.crates-io]
 embassy-stm32 = { path = "./embassy-stm32-0.6.0" }

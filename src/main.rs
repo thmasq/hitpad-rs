@@ -3,21 +3,27 @@
 #![feature(impl_trait_in_assoc_type, adt_const_params)]
 #![allow(clippy::future_not_send)]
 
+#[macro_use]
+mod macros;
+
 mod config;
 mod host;
 mod keyboard;
-mod macros;
 mod ps5;
+mod sampling;
 mod types;
 mod xinput;
 
 use crate::pac::interrupt;
+use crate::sampling::digital_sampler_task;
+use crate::sampling::read_gpio_state;
 use defmt_rtt as _;
 use embassy_stm32::time::Hertz;
 use embassy_usb::class::hid::HidBootProtocol;
 use embassy_usb::class::hid::HidSubclass;
 use panic_probe as _;
 
+use crate::types::InputMode;
 use cortex_m_rt::entry;
 use embassy_executor::Executor;
 use embassy_stm32::Config;
@@ -31,10 +37,8 @@ use embassy_usb::Handler;
 use embassy_usb::class::hid::State as HidState;
 use embassy_usb::class::hid::{ReportId, RequestHandler};
 use embassy_usb::control::OutResponse;
-use portable_atomic::{AtomicU32, Ordering};
+use portable_atomic::{AtomicU32, AtomicU64, Ordering};
 use static_cell::StaticCell;
-
-use crate::types::InputMode;
 
 bind_interrupts!(struct Irqs {
     OTG_HS => InterruptHandler<USB_OTG_HS>;
@@ -60,7 +64,10 @@ static HOST_STATE: HostState<12> = HostState::new();
 static mut PS5_HANDLER: crate::ps5::Ps5RequestHandler = crate::ps5::Ps5RequestHandler;
 static mut HID_STATE: embassy_usb::class::hid::State = embassy_usb::class::hid::State::new();
 
-pub static DEBOUNCED_STATE: AtomicU32 = AtomicU32::new(0);
+pub static DEBOUNCED_STATE: AtomicU64 = AtomicU64::new(0);
+pub static ANALOG_BUTTON_STATE: AtomicU32 = AtomicU32::new(0);
+
+const ADC_OVERSAMPLING: u16 = 16;
 
 struct MyDeviceHandler {
     configured: bool,
@@ -208,34 +215,62 @@ fn main() -> ! {
     pac::RCC.ahb4enr().modify(|w| {
         w.set_gpioaen(true);
         w.set_gpioben(true);
+        w.set_gpiocen(true);
         w.set_gpiomen(true);
     });
 
-    for pin in 0..16 {
-        if (config::PIN_MASK & (1 << pin)) != 0 {
-            pac::GPIOA
-                .moder()
-                .modify(|w| w.set_moder(pin, pac::gpio::vals::Moder::INPUT));
-            pac::GPIOA
-                .pupdr()
-                .modify(|w| w.set_pupdr(pin, pac::gpio::vals::Pupdr::PULL_UP));
+    let mut digital_mask: u64 = 0;
+    let mut analog_mask: u64 = 0;
+
+    if let Some(reboot_idx) = config::REBOOT_PIN {
+        digital_mask |= 1 << reboot_idx;
+    }
+
+    for (pin_idx, mapped_btn) in config::PROFILES[0].pin_map.iter().enumerate() {
+        if let Some(binding) = mapped_btn {
+            match binding {
+                crate::types::ButtonBinding::Digital(_) => digital_mask |= 1 << pin_idx,
+                crate::types::ButtonBinding::Analog(_)
+                | crate::types::ButtonBinding::AnalogSingle(_) => {
+                    analog_mask |= 1 << pin_idx;
+                }
+            }
         }
     }
-    for pin in 16..32 {
-        if (config::PIN_MASK & (1 << pin)) != 0 {
-            let b_pin = pin - 16;
-            pac::GPIOB
-                .moder()
-                .modify(|w| w.set_moder(b_pin, pac::gpio::vals::Moder::INPUT));
-            pac::GPIOB
-                .pupdr()
-                .modify(|w| w.set_pupdr(b_pin, pac::gpio::vals::Pupdr::PULL_UP));
+
+    let configure_pin = |pin: usize, is_digital: bool| {
+        let (port, pin_num) = if pin < 16 {
+            (&pac::GPIOA, pin)
+        } else if pin < 32 {
+            (&pac::GPIOB, pin - 16)
+        } else {
+            (&pac::GPIOC, pin - 32)
+        };
+
+        if is_digital {
+            port.moder()
+                .modify(|w| w.set_moder(pin_num, pac::gpio::vals::Moder::INPUT));
+            port.pupdr()
+                .modify(|w| w.set_pupdr(pin_num, pac::gpio::vals::Pupdr::PULL_UP));
+        } else {
+            port.moder()
+                .modify(|w| w.set_moder(pin_num, pac::gpio::vals::Moder::ANALOG));
+            port.pupdr()
+                .modify(|w| w.set_pupdr(pin_num, pac::gpio::vals::Pupdr::FLOATING));
+        }
+    };
+
+    for pin in 0..48 {
+        if (digital_mask & (1 << pin)) != 0 {
+            configure_pin(pin, true);
+        } else if (analog_mask & (1 << pin)) != 0 {
+            configure_pin(pin, false);
         }
     }
 
     embassy_time::block_for(embassy_time::Duration::from_millis(10));
 
-    let initial_state = read_gpio_state();
+    let initial_state = read_gpio_state(digital_mask);
 
     DEBOUNCED_STATE.store(initial_state, Ordering::Relaxed);
 
@@ -299,7 +334,8 @@ fn main() -> ! {
 
             executor.run(move |spawner| {
                 spawner.spawn(usb_task_hs(usb_hs).unwrap());
-                spawner.spawn(sampler_task(initial_state).unwrap());
+                spawner.spawn(digital_sampler_task(initial_state, digital_mask).unwrap());
+                spawner.spawn(crate::sampling::analog_sampler_task().unwrap());
                 spawner.spawn(crate::keyboard::main_loop_task(driver).unwrap());
             })
         }
@@ -309,7 +345,8 @@ fn main() -> ! {
 
             executor.run(move |spawner| {
                 spawner.spawn(usb_task_hs(usb_hs).unwrap());
-                spawner.spawn(sampler_task(initial_state).unwrap());
+                spawner.spawn(digital_sampler_task(initial_state, digital_mask).unwrap());
+                spawner.spawn(crate::sampling::analog_sampler_task().unwrap());
                 spawner.spawn(crate::xinput::main_loop_task(driver).unwrap());
             })
         }
@@ -334,60 +371,19 @@ fn main() -> ! {
             executor.run(move |spawner| {
                 spawner.spawn(usb_task_hs(usb_hs).unwrap());
                 spawner.spawn(crate::host::host_task(driver_host).unwrap());
-                spawner.spawn(sampler_task(initial_state).unwrap());
+                spawner.spawn(digital_sampler_task(initial_state, digital_mask).unwrap());
+                spawner.spawn(crate::sampling::analog_sampler_task().unwrap());
                 spawner.spawn(crate::ps5::main_loop_task(hid).unwrap());
             })
         }
     }
 }
 
-/// Reads GPIOA (Pins 0-15) and GPIOB (Pins 16-31) and combines them into a 32-bit integer.
-#[allow(clippy::inline_always, clippy::similar_names)]
-#[inline(always)]
-fn read_gpio_state() -> u32 {
-    let porta = pac::GPIOA.idr().read().0;
-    let portb = pac::GPIOB.idr().read().0;
-
-    let combined = (portb << 16) | porta;
-
-    !combined & config::PIN_MASK
-}
-
-#[embassy_executor::task]
-async fn sampler_task(initial_state: u32) {
-    let mut history = [0u32; 16];
-    history.fill(initial_state);
-    let mut history_idx = 0;
-    let mut current_debounced = initial_state;
-
-    let mut ticker = embassy_time::Ticker::every(embassy_time::Duration::from_micros(50));
-
-    loop {
-        let raw_state = read_gpio_state();
-
-        history[history_idx] = raw_state;
-        history_idx = (history_idx + 1) % 16;
-
-        let mut all_ones = 0xFFFF_FFFF;
-        let mut all_zeros = 0xFFFF_FFFF;
-
-        for state in &history {
-            all_ones &= state;
-            all_zeros &= !state;
-        }
-
-        current_debounced = (current_debounced | all_ones) & !all_zeros;
-        DEBOUNCED_STATE.store(current_debounced, Ordering::Relaxed);
-
-        ticker.next().await;
-    }
-}
-
-fn detect_boot_mode(raw_state: u32) -> InputMode {
+fn detect_boot_mode(raw_state: u64) -> InputMode {
     for boot_override in config::BOOT_OVERRIDES {
         for (pin_idx, mapped_btn) in config::PROFILES[0].pin_map.iter().enumerate() {
             if let Some(btn) = mapped_btn
-                && *btn as u8 == boot_override.button as u8
+                && btn.button() as u8 == boot_override.button as u8
                 && (raw_state & (1 << pin_idx)) != 0
             {
                 return boot_override.mode;

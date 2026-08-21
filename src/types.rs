@@ -1,7 +1,7 @@
 use bitflags::bitflags;
 use core::marker::ConstParamTy;
 
-const MAX_PINS: usize = 30;
+pub const MAX_PINS: usize = 48;
 
 bitflags! {
     /// A bitmask representing the physical buttons currently held down.
@@ -105,6 +105,31 @@ pub enum InputMode {
     PS5,
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum ButtonBinding {
+    Digital(Button),
+    Analog(Button),
+    AnalogSingle(Button),
+}
+
+impl ButtonBinding {
+    /// Helper to extract the underlying button for validation and mapping
+    pub const fn button(&self) -> Button {
+        match self {
+            Self::Digital(b) => *b,
+            Self::Analog(b) => *b,
+            Self::AnalogSingle(b) => *b,
+        }
+    }
+}
+
+pub struct AdcPin {
+    pub adc1_ch: Option<u8>,
+    pub adc2_ch: Option<u8>,
+    #[allow(dead_code)]
+    pub fast: bool,
+}
+
 #[allow(dead_code)]
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Button {
@@ -137,7 +162,7 @@ pub struct BootOverride {
 #[derive(Copy, Clone)]
 pub struct Profile {
     pub name: &'static str,
-    pub pin_map: [Option<Button>; MAX_PINS],
+    pub pin_map: [Option<ButtonBinding>; MAX_PINS],
 }
 
 impl Profile {
@@ -150,13 +175,9 @@ impl Profile {
     }
 
     /// Const builder method.
-    pub const fn bind(mut self, pin: u8, button: Button) -> Self {
-        assert!(
-            (pin as usize) < MAX_PINS,
-            "Invalid GPIO pin! RP2040 only supports pins 0-29."
-        );
-
-        self.pin_map[pin as usize] = Some(button);
+    pub const fn bind(mut self, pin: u8, binding: ButtonBinding) -> Self {
+        assert!((pin as usize) < MAX_PINS, "Invalid GPIO pin!");
+        self.pin_map[pin as usize] = Some(binding);
         self
     }
 }
@@ -167,6 +188,8 @@ pub const fn validate_config(
     reboot_pin: Option<u8>,
     modifiers: &[Button],
     overrides: &[BootOverride],
+    adc1_seq: &[u8],
+    adc2_seq: &[u8],
 ) {
     assert!(
         !profiles.is_empty(),
@@ -187,18 +210,52 @@ pub const fn validate_config(
 
         let mut pin_idx = 0;
         while pin_idx < profile.pin_map.len() {
-            if let Some(btn_a) = profile.pin_map[pin_idx] {
+            if let Some(binding_a) = profile.pin_map[pin_idx] {
                 // --- BUTTON DEDUPLICATION ---
                 // Check all subsequent pins to ensure this button isn't mapped twice
                 let mut check_idx = pin_idx + 1;
                 while check_idx < profile.pin_map.len() {
-                    if let Some(btn_b) = profile.pin_map[check_idx] {
+                    if let Some(binding_b) = profile.pin_map[check_idx] {
                         assert!(
-                            btn_a as u8 != btn_b as u8,
+                            binding_a.button() as u8 != binding_b.button() as u8,
                             "Configuration Error: A button is bound to multiple pins in the same profile!"
                         );
                     }
                     check_idx += 1;
+                }
+
+                // --- SEQUENCE CHECK FOR ANALOG ---
+                // Ensure any pin declared as Analog or AnalogSingle is actually being scanned by DMA
+                let is_analog = match binding_a {
+                    ButtonBinding::Analog(_) | ButtonBinding::AnalogSingle(_) => true,
+                    ButtonBinding::Digital(_) => false,
+                };
+
+                if is_analog {
+                    let mut found = false;
+
+                    let mut i = 0;
+                    while i < adc1_seq.len() {
+                        if adc1_seq[i] == pin_idx as u8 {
+                            found = true;
+                            break;
+                        }
+                        i += 1;
+                    }
+
+                    let mut j = 0;
+                    while j < adc2_seq.len() {
+                        if adc2_seq[j] == pin_idx as u8 {
+                            found = true;
+                            break;
+                        }
+                        j += 1;
+                    }
+
+                    assert!(
+                        found,
+                        "Configuration Error: An Analog or AnalogSingle button is mapped to a pin that is not present in adc1_sequence or adc2_sequence!"
+                    );
                 }
             }
             pin_idx += 1;
@@ -214,7 +271,7 @@ pub const fn validate_config(
 
             while p_idx < profile.pin_map.len() {
                 if let Some(mapped_btn) = profile.pin_map[p_idx]
-                    && mapped_btn as u8 == req_btn as u8
+                    && mapped_btn.button() as u8 == req_btn as u8
                 {
                     found = true;
                     break;
@@ -244,7 +301,7 @@ pub const fn validate_config(
 
         while p_idx < default_profile.pin_map.len() {
             if let Some(mapped_btn) = default_profile.pin_map[p_idx]
-                && mapped_btn as u8 == req_btn as u8
+                && mapped_btn.button() as u8 == req_btn as u8
             {
                 found = true;
                 break;

@@ -1,16 +1,13 @@
 //! Main user configuration file. Edit this, run `cargo build --release`, and flash!
 
-use crate::{
-    define_gamepad_config,
-    types::{
-        BootOverride,
-        Button::{self, Action1, Action2, Action3, Left, Right, Select, Start},
-        InputMode::{self, Keyboard, PS5, XInput},
-    },
+use crate::types::{
+    BootOverride,
+    Button::{self, Action1, Action2, Action3, Left, Right, Select, Start},
+    InputMode::{self, Keyboard, PS5, XInput},
 };
 
 // ==========================================
-// 1. SYSTEM & BOOT SETTINGS
+// SYSTEM & BOOT SETTINGS
 // ==========================================
 
 /// The default mode the controller uses when plugged in normally.
@@ -33,7 +30,7 @@ pub const BOOT_OVERRIDES: &[BootOverride] = &[
 ];
 
 // ==========================================
-// 2. PROFILE MANAGEMENT
+// PROFILE MANAGEMENT
 // ==========================================
 
 /// Buttons you must hold down to trigger a profile switch.
@@ -46,42 +43,53 @@ pub const PROFILE_NEXT: Button = Right;
 pub const PROFILE_PREV: Button = Left;
 
 // ==========================================
-// 3. HARDWARE PIN MAPPINGS
+// HARDWARE PIN MAPPINGS
 // ==========================================
 
 define_gamepad_config! {
     reboot_pin: PB10,
     profiles: [
         "Standard FightStick" => {
-            PA2: Up,
-            PA3: Down,
-            PA4: Left,
-            PA5: Right,
-            PA6: Action1,
-            PA7: Action2,
-            PB5: Action3,
-            PA9: Action4,
-            PA10: Action5,
-            PA11: Action6,
-            PA12: Action7,
-            PB3: Action8,
-            PB4: Start,
-            PA15: Select,
-            PB0: Home,
-            PB1: Touchpad
+            PC1: Analog(Left),
+            PC2: Analog(Right),
+            PA0: Analog(Action1),
+            PA1: Analog(Action2),
+            PA6: Analog(Action3),
+            PA2: Analog(Action4),
+            PA3: Analog(Action5),
+            PA7: Analog(Action6),
+            PB0: Analog(Action7),
+            PC4: Analog(Action8),
+            PB1: Analog(Up),
+            PC0: Analog(Down),
+
+            PA4: AnalogSingle(Start),
+            PA5: AnalogSingle(Select),
+            PC3: Home,
+            PC5: Touchpad,
         },
         "Platformer" => {
-            PA2: Action1,
-            PA3: Down,
-            PA4: Left,
-            PA5: Right,
-            PB4: Start,
-            PA15: Select
+            PC1: Analog(Left),
+            PC2: Analog(Right),
+            PC0: Analog(Down),
+            PA0: Analog(Action1),
+            PC1: Start,
+            PC2: Select
         }
-    ]
+    ],
+    // The sequence for DMA conversion
+    adc1_sequence: [PA4, PA0, PA1, PA6, PA2, PA3, PA7, PB0],
+    adc2_sequence: [PA5, PC4, PB1, PC0, PC1, PC2, PC3, PC5],
 }
 
 // ==========================================
 // COMPILE-TIME VALIDATION (Do not touch)
 // ==========================================
-const _: () = crate::types::validate_config(PROFILES, REBOOT_PIN, PROFILE_MODIFIER, BOOT_OVERRIDES);
+const _: () = crate::types::validate_config(
+    PROFILES,
+    REBOOT_PIN,
+    PROFILE_MODIFIER,
+    BOOT_OVERRIDES,
+    ADC1_SEQUENCE,
+    ADC2_SEQUENCE,
+);
